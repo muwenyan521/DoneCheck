@@ -1,0 +1,24 @@
+{
+  "name": "@donecheck/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./biome/base.json": "./biome/base.json",
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsup/base": "./tsup/base.mjs"
+  },
+  "scripts": {
+    "build": "node --check tsup/base.mjs",
+    "lint": "biome check .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "node --check tsup/base.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@types/node": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "donecheck",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=22 <23",
+    "pnpm": ">=11.8.0 <12"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "check:deps": "node scripts/check-dependency-boundaries.mjs",
+    "check:licenses": "node scripts/check-licenses.mjs",
+    "commitlint": "commitlint",
+    "lint": "biome check . && pnpm check:deps && pnpm check:licenses",
+    "prepare": "husky",
+    "test": "vitest run scripts/*.test.mjs && turbo run test",
+    "typecheck": "turbo run typecheck",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@commitlint/cli": "catalog:",
+    "@commitlint/config-conventional": "catalog:",
+    "husky": "catalog:",
+    "license-checker": "catalog:",
+    "lint-staged": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs,ts,tsx,json,jsonc,md,yml,yaml}": "biome check --write --no-errors-on-unmatched"
+  }
+}

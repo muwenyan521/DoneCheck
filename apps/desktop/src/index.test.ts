@@ -9,7 +9,7 @@ describe("runDesktopAnalysis", () => {
       workspacePath: "/tmp/donecheck",
     });
 
-    expect(result.passed).toBe(true);
+    expect(result.status).toBe("partial");
   });
 });
 

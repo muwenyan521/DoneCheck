@@ -7,7 +7,7 @@ export interface ReportSummaryProps {
 export function ReportSummary({ result }: ReportSummaryProps) {
   return (
     <section aria-label="DoneCheck report summary">
-      <strong>{result.passed ? "Passed" : "Needs work"}</strong>
+      <strong>{result.status === "pass" ? "Passed" : "Needs work"}</strong>
       <p>{result.summary}</p>
       <time dateTime={result.checkedAt}>{result.checkedAt}</time>
     </section>

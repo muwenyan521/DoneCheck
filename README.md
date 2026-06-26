@@ -1,6 +1,6 @@
 # DoneCheck
 
-DoneCheck 是一个检测「AI 是否真正完成了需求」的开源工具。本仓库处于阶段 0：工程地基与脚手架，目标是先把可复现环境、Monorepo 边界、CI 与合规闸门固定下来。
+DoneCheck 是一个检测「AI 是否真正完成了需求」的开源工具。本仓库处于阶段 1：shared 契约层与 core 分析引擎骨架，目标是在阶段 0 的可复现环境、Monorepo 边界、CI 与合规闸门之上，跑通「输入需求与证据 → 输出结构化 DoneCheckResult」的最小分析链路。
 
 ## 快速开始
 
@@ -60,6 +60,32 @@ apps/
 - `templates` 是零运行时依赖的叶子包（不依赖任何运行时包，包括第三方运行时依赖）；模板 schema 校验在 `shared`。
 
 `pnpm lint` 会运行依赖边界校验与 license 闸门，CI 中同样执行。
+
+## 阶段 1 最小分析链路
+
+`@donecheck/shared` 只承接契约、schema 校验和纯类型工具。核心契约包括 `Requirement`、`Evidence`、`Check`、`CheckResult` 与 `DoneCheckResult`，每个契约都导出 zod schema、`z.infer` 类型，以及 `parse*` / `safeParse*` 校验函数。`shared` 不包含分析业务逻辑，也不依赖任何 `@donecheck/*` 运行时包。
+
+`@donecheck/core` 承接全部分析逻辑，保持纯 Node、零原生依赖。阶段 1 的 `analyze` 会把输入归一化为 shared 契约，运行默认注册的三条规则：需求文本非空、证据文本非空、证据关键词覆盖需求，并汇总为经 shared schema 校验过的 `DoneCheckResult`。
+
+```ts
+import { analyze } from "@donecheck/core";
+
+const result = analyze({
+  requirement: {
+    id: "req-1",
+    text: "Implement shared contracts and core analysis tests.",
+  },
+  evidence: {
+    id: "ev-1",
+    source: "test-output",
+    text: "The shared contracts, core analysis, and tests are implemented and verified.",
+  },
+});
+
+console.log(result.status, result.score, result.summary);
+```
+
+阶段 1 不触碰 desktop 持久化与 SQLite。`better-sqlite3` 仍只允许出现在 `apps/desktop`，Electron ABI 重编译与持久化集成留给后续阶段。
 
 ## 常用命令
 

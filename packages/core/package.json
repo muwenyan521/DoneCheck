@@ -8,6 +8,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./semantic": {
+      "types": "./dist/semantic/index.d.ts",
+      "import": "./dist/semantic/index.js",
+      "require": "./dist/semantic/index.cjs"
     }
   },
   "main": "./dist/index.cjs",
@@ -20,7 +25,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@donecheck/shared": "workspace:*"
+    "@donecheck/shared": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",

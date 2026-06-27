@@ -169,6 +169,9 @@ importers:
       '@donecheck/shared':
         specifier: workspace:*
         version: link:../shared
+      zod:
+        specifier: 'catalog:'
+        version: 3.23.8
     devDependencies:
       '@donecheck/config':
         specifier: workspace:*

@@ -40,7 +40,7 @@ direnv allow
 ```text
 packages/
   shared/      共享类型、常量、Zod schema（含 result/template schema）与工具
-  core/        分析引擎 SDK，纯 Node，零原生依赖
+  core/        分析引擎 SDK 与阶段 3 语义层，纯 Node，零原生依赖
   templates/   静态核查模板数据与类型（零运行时依赖，schema 校验在 shared）
   report-ui/   React 报告组件，只依赖 shared 类型
   config/      共享 tsconfig、Biome、tsup 预设
@@ -54,7 +54,7 @@ apps/
 依赖方向为：`shared ← core ← {cli, vscode, desktop}`。
 
 - `shared` 不依赖任何 DoneCheck 运行时包。
-- `core` 只依赖 `shared`，所有分析逻辑只能放在 `core`，且零原生依赖。
+- `core` 只依赖 `shared` 与契约校验所需的 `zod`，所有分析逻辑只能放在 `core`，且零原生依赖。
 - `cli` 只运行时依赖 `core`，不在生产代码中运行时 import `shared`；JSON 契约复验只在测试中使用 `shared`。
 - `desktop` 可以依赖 `core` 与 `shared`，也是唯一允许原生依赖 `better-sqlite3` 的位置。
 - `report-ui` 只能使用 `shared` 的**类型**（`import type`），不允许运行时 import `core` 等分析逻辑。
@@ -160,6 +160,40 @@ console.log(result.status, result.score, result.summary);
 ```
 
 阶段 1 不触碰 desktop 持久化与 SQLite。
+
+## 阶段 3 LLM 语义层
+
+阶段 3 在 `@donecheck/core` 内新增独立的 `semantic` 模块，专注候选收敛与语义草案，不修改现有 `analyze()`、`defaultChecks`、`DoneCheckResult`、CLI 退出码或 pass/fail/partial 聚合语义。
+
+### 第 0 级选文件
+
+`selectCandidateFiles()` 基于需求文本、可选 AI 承诺、压缩后的项目结构摘要和静态信号，调用 provider-neutral 的 `LLMProvider.generateObject()` 生成候选文件。模型输出必须先通过 Zod schema 校验（provider 层与业务层各做一次），随后 core 才会做路径归一化、去重、存在性校验和 `topK` 上限控制。
+
+选文件以召回优先。`topK` 仅约束 `llmSelected` 的数量；`strength === "strong"` 的静态信号文件作为兜底补入，不受 `topK` 截断——即使 `llmSelected` 已达到 `topK` 上限，静态强信号文件仍会被追加到最终候选列表中（最终候选数可能超过 `topK`，此时会产出 warning）。输出中显式区分：
+
+- `llmSelected`：由 LLM 选中、经 topK 截断后的存在文件。
+- `staticallyRecalled`：由静态强信号兜底补入、不受 topK 约束的存在文件。
+
+### 第 2 级精判草案
+
+`draftSemanticJudgement()` 基于单条 requirement、可选 claim、候选 evidence snippets 和候选文件 metadata，输出 `SemanticJudgementDraft`。草案状态只允许：
+
+- `fulfilled`
+- `partial`
+- `unsupported`
+- `suspicious`
+
+`judgementDraft` 是 LLM 语义层草案，不是最终六状态，也不会映射到 core 现有 `pass/fail/partial` 聚合规则。最终六状态、兑现率和跨项聚合属于阶段 4 规则引擎。
+
+### Prompt 与 Provider
+
+阶段 3 prompt 模板放在 `packages/core/src/prompts/*`，每个 prompt 都有版本常量，并与 Zod schema 字段对齐。业务逻辑只依赖统一 `LLMProvider` 抽象，不读取厂商专有响应字段。测试优先使用 mock provider，因此不要求真实联网模型即可验证结构化输出、重试、静态召回和集成薄切片。
+
+### 后续阶段边界
+
+- 阶段 4：把语义草案、静态证据和规则上下文映射为最终六状态与兑现率。
+- 阶段 5：在报告组件展示层处理 zh-CN / en 双语展示。
+- 更正式的整体 fail 规格若要进入真实 E2E，应作为后续 core 规格变更单独设计，不属于阶段 3。
 
 ## 常用命令
 

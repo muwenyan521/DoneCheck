@@ -15,6 +15,7 @@ const packageByDir = new Map([
   ["packages/templates", "templates"],
   ["packages/report-ui", "report-ui"],
   ["packages/config", "config"],
+  ["apps/cli", "cli"],
   ["apps/desktop", "desktop"],
 ]);
 
@@ -25,6 +26,7 @@ const allowedRuntimeImports = new Map([
   ["templates", new Set()],
   ["report-ui", new Set()],
   ["config", new Set()],
+  ["cli", new Set(["core"])],
   ["desktop", new Set(["core", "shared"])],
 ]);
 
@@ -36,6 +38,7 @@ const allowedTypeOnlyImports = new Map([
   ["templates", new Set()],
   ["report-ui", new Set(["shared"])],
   ["config", new Set()],
+  ["cli", new Set(["core", "shared"])],
   ["desktop", new Set(["core", "shared"])],
 ]);
 
@@ -55,6 +58,11 @@ function packageForFile(filePath) {
     }
   }
   return undefined;
+}
+
+function isTestFile(filePath) {
+  const basename = path.basename(filePath);
+  return basename.includes(".test.") || basename.includes(".spec.");
 }
 
 async function collectFiles(directory) {
@@ -220,6 +228,8 @@ async function checkSourceFiles() {
         // @donecheck/config is a build-time config package, not subject to
         // runtime boundary rules.
         if (ref.name === "config" || ref.name === owner) continue;
+
+        if (owner === "cli" && ref.name === "shared" && isTestFile(ref.file)) continue;
 
         if (ref.kind === "runtime" && !runtimeAllowed.has(ref.name)) {
           failures.push(

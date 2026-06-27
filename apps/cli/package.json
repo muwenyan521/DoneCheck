@@ -1,0 +1,32 @@
+{
+  "name": "@donecheck/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "donecheck": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "module": "./dist/index.js",
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@donecheck/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@donecheck/config": "workspace:*",
+    "@donecheck/shared": "workspace:*",
+    "@types/node": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

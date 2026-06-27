@@ -12,6 +12,18 @@ function runChecker() {
   }).toString();
 }
 
+function runCheckerFailure() {
+  try {
+    runChecker();
+  } catch (error) {
+    if (isExecError(error)) {
+      return `${error.stdout.toString()}${error.stderr.toString()}`;
+    }
+    throw error;
+  }
+  throw new Error("Expected dependency boundary checker to fail.");
+}
+
 function writeFixture(relativePath, content) {
   const absolute = path.join(root, relativePath);
   mkdirSync(path.dirname(absolute), { recursive: true });
@@ -21,6 +33,17 @@ function writeFixture(relativePath, content) {
 
 function removeFixture(absolutePath) {
   rmSync(absolutePath, { force: true });
+}
+
+function isExecError(error) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "stdout" in error &&
+    "stderr" in error &&
+    Buffer.isBuffer(error.stdout) &&
+    Buffer.isBuffer(error.stderr)
+  );
 }
 
 describe("dependency boundary checker", () => {
@@ -35,6 +58,18 @@ describe("dependency boundary checker", () => {
     );
     try {
       expect(() => runChecker()).toThrow();
+    } finally {
+      removeFixture(fixture);
+    }
+  });
+
+  it("fails when cli runtime-imports @donecheck/shared", () => {
+    const fixture = writeFixture(
+      "apps/cli/src/runtime-shared-should-fail.ts",
+      'import { parseDoneCheckResult } from "@donecheck/shared";\nexport const x = parseDoneCheckResult;\n',
+    );
+    try {
+      expect(runCheckerFailure()).toContain("cli runtime-imports @donecheck/shared");
     } finally {
       removeFixture(fixture);
     }

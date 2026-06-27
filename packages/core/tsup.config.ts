@@ -8,6 +8,6 @@ export default defineConfig({
       composite: false,
     },
   },
-  entry: ["src/index.ts", "src/semantic/index.ts"],
+  entry: ["src/index.ts", "src/semantic/index.ts", "src/rules/index.ts"],
   format: ["esm", "cjs"],
 });

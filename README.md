@@ -163,7 +163,7 @@ console.log(result.status, result.score, result.summary);
 
 ## 阶段 3 LLM 语义层
 
-阶段 3 在 `@donecheck/core` 内新增独立的 `semantic` 模块，专注候选收敛与语义草案，不修改现有 `analyze()`、`defaultChecks`、`DoneCheckResult`、CLI 退出码或 pass/fail/partial 聚合语义。
+阶段 3 在 `@donecheck/core` 内新增独立的 `semantic` 模块，专注候选收敛与语义草案，不修改现有 `analyze()`、`defaultChecks`、`DoneCheckResult`、CLI 退出码或 pass/fail/partial 聚合语义。阶段 4 在此基础上新增独立的 `rules` 模块，把 semantic draft、静态证据、召回来源与假实现信号合成为可复现的最终判定结果。
 
 ### 第 0 级选文件
 
@@ -193,7 +193,58 @@ console.log(result.status, result.score, result.summary);
 
 - 阶段 4：把语义草案、静态证据和规则上下文映射为最终六状态与兑现率。
 - 阶段 5：在报告组件展示层处理 zh-CN / en 双语展示。
-- 更正式的整体 fail 规格若要进入真实 E2E，应作为后续 core 规格变更单独设计，不属于阶段 3。
+- 更正式的整体 fail 规格若要进入真实 E2E，应作为后续 core 规格变更单独设计，不属于阶段 3/4。
+
+## 阶段 4 规则引擎
+
+阶段 4 在 `@donecheck/core/rules` 下提供纯函数规则引擎入口：`buildJudgementReport()`，并保留同义导出 `evaluateJudgements()`。该模块只消费已有 requirement、claim、`SemanticJudgementDraft`、静态信号、假实现信号和需求外候选项，不调用 LLM、不读取文件系统、不修改旧 `analyze()` 主链路。`generatedAt` 由调用方显式提供（必填），规则引擎核心不调用 `new Date()`，保证同输入同输出。对外稳定契约仅 `buildJudgementReport()` / `evaluateJudgements()` / `evaluateFinalJudgement()` 与对应 schema，coverage 计算是内部实现细节，不作为公共 API 暴露。
+
+### judgementDraft 与最终六状态
+
+`judgementDraft` 仍然只是阶段 3 语义层草案，取值为 `fulfilled | partial | unsupported | suspicious`。阶段 4 的最终状态是规则引擎输出的六状态：
+
+- `fulfilled`：强证据支持，语义草案倾向 fulfilled，且没有确认的假实现信号。
+- `partial`：存在中等或部分证据，语义草案为 partial，或 fulfilled 但静态证据覆盖不足。
+- `insufficient-evidence`：有线索但不足以稳定判断，默认从兑现率分母中剔除并单独计数。
+- `unfulfilled`：semantic unsupported，或 suspicious 但没有确认的假实现信号且静态证据不能补强。
+- `suspicious-fake-implementation`：命中 mock、alert-only、empty-handler、not-implemented、todo、ui-only 等中强假实现信号。
+- `extra-scope`：候选项不属于 requirement/claim，但被识别为明显需求外功能扩张。
+
+因此二者不是一对一映射：例如 semantic fulfilled 遇到强假实现信号会变成 `suspicious-fake-implementation`；semantic fulfilled 但证据覆盖不足会变成 `partial`；semantic partial 且低置信弱证据会变成 `insufficient-evidence`。
+
+### 双兑现率策略
+
+规则引擎分别计算 `requirementCoverage` 与 `claimCoverage`。需求兑现率的分母来自 requirement 判定项，AI 承诺兑现率的分母来自 claim 判定项，`extra-scope` 不进入任一兑现率分母。
+
+阶段 4 的 v1 权重固定为：
+
+- `fulfilled = 1`
+- `partial = 0.5`
+- `unfulfilled = 0`
+- `suspicious-fake-implementation = 0`
+- `extra-scope = 0`，但不进入 requirement/claim 覆盖率分母
+- `insufficient-evidence` 单列计数，并从 coverage 分母中剔除
+
+剔除 `insufficient-evidence` 的原因是它表示“当前证据不足以稳定判断”，不是明确兑现或明确未兑现。报告结构会返回 `excludedInsufficientEvidence`，展示层可以在阶段 5 单独说明不确定项数量。
+
+### 范围偏离度
+
+`scopeDrift` 用来衡量需求外加戏比例。v1 规则为：
+
+```text
+scopeDrift.score = extraScopeCount / totalJudgements
+```
+
+当总判定项为 0 时分数为 0。等级规则固定为：`score < 0.2` 为 `low`，`0.2 <= score < 0.5` 为 `medium`，`score >= 0.5` 为 `high`。该指标只描述范围偏离，不替代 requirement 或 claim 的兑现率。
+
+### 为什么不改旧 analyze 聚合语义
+
+`analyze()` 是阶段 1/2 已被 CLI 消费的稳定最小规则链路，输出 shared 的 `DoneCheckResult`，其 `pass/fail/partial` 聚合和 CLI 退出码已经形成兼容边界。阶段 4 的目标是新增独立最终判定能力，而不是改变旧主入口行为；因此规则引擎放在 `@donecheck/core/rules`，以新的 `JudgementReport` schema 输出六状态、reasonCode、coverage 与 scopeDrift。
+
+### 后续安排
+
+- 阶段 5 才会在 report-ui / GUI / CLI 展示层处理 zh-CN / en 双语文案映射，阶段 4 只输出稳定 reasonCode 和中性内部 explanation。
+- “整体 fail 真实 E2E 可达性”属于更后续的 core 规格问题，需要独立设计，不在阶段 4 顺手修改。
 
 ## 常用命令
 

@@ -13,6 +13,11 @@
       "types": "./dist/semantic/index.d.ts",
       "import": "./dist/semantic/index.js",
       "require": "./dist/semantic/index.cjs"
+    },
+    "./rules": {
+      "types": "./dist/rules/index.d.ts",
+      "import": "./dist/rules/index.js",
+      "require": "./dist/rules/index.cjs"
     }
   },
   "main": "./dist/index.cjs",

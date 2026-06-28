@@ -1,5 +1,23 @@
 import { z } from "zod";
 
+// Stage 4 report contracts live in `@donecheck/shared` so that consumers
+// (report-ui, future GUI, export tooling) can `import type` the authoritative
+// report shape without taking a runtime dependency on `core`. We re-export
+// them here so existing imports from `../semantic/schema.js` keep working.
+export {
+  judgementDraftSchema,
+  semanticEvidenceRefSchema,
+  semanticJudgementDraftSchema,
+  staticSignalSchema,
+} from "@donecheck/shared";
+
+export type {
+  JudgementDraft,
+  SemanticEvidenceRef,
+  SemanticJudgementDraft,
+  StaticSignal,
+} from "@donecheck/shared";
+
 const nonEmptyTrimmedString = z.string().trim().min(1);
 
 export const fileSelectionModelOutputSchema = z.object({
@@ -10,14 +28,6 @@ export const fileSelectionModelOutputSchema = z.object({
 });
 
 export type FileSelectionModelOutput = z.infer<typeof fileSelectionModelOutputSchema>;
-
-export const staticSignalSchema = z.object({
-  filePath: nonEmptyTrimmedString,
-  keyword: nonEmptyTrimmedString,
-  strength: z.enum(["weak", "medium", "strong"]),
-});
-
-export type StaticSignal = z.infer<typeof staticSignalSchema>;
 
 export const fileSelectionResultSchema = z.object({
   candidateFiles: z.array(nonEmptyTrimmedString),
@@ -71,29 +81,3 @@ export const candidateFileMetadataSchema = z.object({
 });
 
 export type CandidateFileMetadata = z.infer<typeof candidateFileMetadataSchema>;
-
-export const semanticEvidenceRefSchema = z.object({
-  filePath: nonEmptyTrimmedString,
-  lineEnd: z.number().int().positive(),
-  lineStart: z.number().int().positive(),
-  snippetSummary: nonEmptyTrimmedString,
-});
-
-export type SemanticEvidenceRef = z.infer<typeof semanticEvidenceRefSchema>;
-
-export const judgementDraftSchema = z.enum(["fulfilled", "partial", "unsupported", "suspicious"]);
-
-export type JudgementDraft = z.infer<typeof judgementDraftSchema>;
-
-export const semanticJudgementDraftSchema = z.object({
-  confidence: z.number().min(0).max(1),
-  evidenceRefs: z.array(semanticEvidenceRefSchema).min(1),
-  explanation: nonEmptyTrimmedString,
-  judgementDraft: judgementDraftSchema,
-  matchedClaimId: nonEmptyTrimmedString.optional(),
-  matchedRequirementId: nonEmptyTrimmedString.optional(),
-  possibleExtraScope: z.array(z.string().trim().min(1)).optional(),
-  repairSuggestion: nonEmptyTrimmedString,
-});
-
-export type SemanticJudgementDraft = z.infer<typeof semanticJudgementDraftSchema>;

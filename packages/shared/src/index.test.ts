@@ -1,23 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
+  RULE_ENGINE_VERSION,
   checkResultSchema,
   checkSchema,
+  confidenceLevelSchema,
+  coverageResultSchema,
   doneCheckResultSchema,
   evidenceSchema,
+  finalJudgementKindSchema,
+  finalJudgementSchema,
+  finalStatusSchema,
+  judgementReportSchema,
   parseCheck,
   parseCheckResult,
   parseDoneCheckResult,
   parseEvidence,
   parseRequirement,
+  reasonCodeSchema,
   requirementSchema,
   safeParseCheck,
   safeParseCheckResult,
   safeParseDoneCheckResult,
   safeParseEvidence,
   safeParseRequirement,
+  scopeDriftSchema,
+  summaryStatsSchema,
   templateSchema,
   validateTemplate,
 } from "./index.js";
+import type { FinalJudgement, JudgementReport } from "./index.js";
 
 const validRequirement = {
   id: "req-1",
@@ -167,5 +178,115 @@ describe("templateSchema / validateTemplate", () => {
 
   it("rejects a template missing required fields", () => {
     expect(() => templateSchema.parse({ id: "default" })).toThrow();
+  });
+});
+
+describe("stage 4 report contracts", () => {
+  it("exposes the six finalStatus values and stable enums", () => {
+    expect(finalStatusSchema.options).toEqual([
+      "fulfilled",
+      "partial",
+      "insufficient-evidence",
+      "unfulfilled",
+      "suspicious-fake-implementation",
+      "extra-scope",
+    ]);
+    expect(finalJudgementKindSchema.options).toEqual(["requirement", "claim", "extra-scope"]);
+    expect(confidenceLevelSchema.options).toEqual(["low", "medium", "high"]);
+    expect(reasonCodeSchema.options).toContain("fake-implementation-signal-detected");
+    expect(reasonCodeSchema.options).toContain("extra-scope-detected");
+  });
+
+  it("exposes RULE_ENGINE_VERSION as the report version literal", () => {
+    expect(RULE_ENGINE_VERSION).toBe("rules-v1");
+    expect(judgementReportSchema.shape.version.value).toBe(RULE_ENGINE_VERSION);
+  });
+
+  it("parses a full JudgementReport produced by the rules engine shape", () => {
+    const validJudgement: FinalJudgement = {
+      confidence: 0.9,
+      confidenceLevel: "high",
+      evidenceRefs: [
+        { filePath: "src/auth.ts", lineEnd: 12, lineStart: 10, snippetSummary: "Token persists." },
+      ],
+      explanation: "Logout handler is wired to an empty handler.",
+      finalStatus: "suspicious-fake-implementation",
+      id: "claim:claim-fake",
+      kind: "claim",
+      reasonCode: "fake-implementation-signal-detected",
+      signals: {
+        evidenceStrength: "medium",
+        fakeImplementationSignals: [
+          {
+            filePath: "src/logout.tsx",
+            lineEnd: 42,
+            lineStart: 42,
+            pattern: "empty-handler",
+            strength: "strong",
+            targetId: "claim-fake",
+            targetKind: "claim",
+          },
+        ],
+        staticSignals: [{ filePath: "src/logout.tsx", keyword: "onClick", strength: "medium" }],
+      },
+      sourceId: "claim-fake",
+    };
+
+    const validReport: JudgementReport = {
+      claimCoverage: {
+        denominator: 1,
+        excludedInsufficientEvidence: 0,
+        score: 0,
+        totalItems: 1,
+        weightedFulfilled: 0,
+      },
+      generatedAt: "2026-06-27T00:00:00.000Z",
+      judgements: [validJudgement],
+      requirementCoverage: {
+        denominator: 0,
+        excludedInsufficientEvidence: 0,
+        score: 0,
+        totalItems: 0,
+        weightedFulfilled: 0,
+      },
+      scopeDrift: { extraScopeCount: 0, level: "low", score: 0 },
+      summaryStats: {
+        "extra-scope": 0,
+        fulfilled: 0,
+        "insufficient-evidence": 0,
+        partial: 0,
+        "suspicious-fake-implementation": 1,
+        unfulfilled: 0,
+      },
+      version: RULE_ENGINE_VERSION,
+      warnings: [],
+    };
+
+    expect(judgementReportSchema.parse(validReport)).toEqual(validReport);
+    expect(finalJudgementSchema.parse(validJudgement)).toEqual(validJudgement);
+  });
+
+  it("rejects an invalid finalStatus and an out-of-range coverage score", () => {
+    expect(() => finalStatusSchema.parse("unknown")).toThrow();
+    expect(() =>
+      coverageResultSchema.parse({
+        denominator: 0,
+        score: 1.5,
+        totalItems: 0,
+        weightedFulfilled: 0,
+        excludedInsufficientEvidence: 0,
+      }),
+    ).toThrow();
+    expect(() => scopeDriftSchema.parse({ extraScopeCount: -1, level: "low", score: 0 })).toThrow();
+    expect(() =>
+      summaryStatsSchema.parse({
+        fulfilled: -1,
+        partial: 0,
+        "insufficient-evidence": 0,
+        unfulfilled: 0,
+        "suspicious-fake-implementation": 0,
+        "extra-scope": 0,
+      }),
+    ).toThrow();
   });
 });

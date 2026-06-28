@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",
+    "@donecheck/core": "workspace:*",
     "@donecheck/shared": "workspace:*",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

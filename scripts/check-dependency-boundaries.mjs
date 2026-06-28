@@ -42,6 +42,23 @@ const allowedTypeOnlyImports = new Map([
   ["desktop", new Set(["core", "shared"])],
 ]);
 
+// Test-only runtime @donecheck/* imports allowed per package.
+//
+// These are packages that the package's source code is NOT allowed to
+// import at runtime, but that the package's test suite MAY import at
+// runtime. This is reserved for integration tests that consume a real
+// authoritative output to prove contract binding — e.g. report-ui tests
+// calling `buildJudgementReport()` from `@donecheck/core/rules` to verify
+// that core/rules and report-ui agree on the JudgementReport shape.
+//
+// Declarations of these packages must live in `devDependencies` only
+// (never `dependencies` or `peerDependencies`), so the runtime shipping
+// surface of the package stays unchanged.
+const allowedTestRuntimeImports = new Map([
+  ["cli", new Set(["shared"])],
+  ["report-ui", new Set(["core"])],
+]);
+
 // Native modules: only apps/desktop may declare them, and only in dependencies.
 const nativeModules = new Set(["better-sqlite3"]);
 const packagesAllowedNative = new Set(["desktop"]);
@@ -229,7 +246,13 @@ async function checkSourceFiles() {
         // runtime boundary rules.
         if (ref.name === "config" || ref.name === owner) continue;
 
-        if (owner === "cli" && ref.name === "shared" && isTestFile(ref.file)) continue;
+        // Test files may runtime-import a package from the test-only
+        // allow-list. This is reserved for integration tests that consume
+        // a real authoritative output (e.g. report-ui tests importing
+        // `buildJudgementReport` from `@donecheck/core/rules`). Source
+        // files in the same package still cannot runtime-import it.
+        const allowedTest = allowedTestRuntimeImports.get(owner) ?? new Set();
+        if (ref.kind === "runtime" && isTestFile(ref.file) && allowedTest.has(ref.name)) continue;
 
         if (ref.kind === "runtime" && !runtimeAllowed.has(ref.name)) {
           failures.push(
@@ -254,6 +277,7 @@ async function checkPackageManifests() {
     const pkg = JSON.parse(content);
     const runtimeAllowed = allowedRuntimeImports.get(packageName) ?? new Set();
     const typeOnlyAllowed = allowedTypeOnlyImports.get(packageName) ?? new Set();
+    const allowedTestRuntime = allowedTestRuntimeImports.get(packageName) ?? new Set();
     const manifestRel = path.relative(root, manifestPath);
 
     for (const section of ["dependencies", "devDependencies", "peerDependencies"]) {
@@ -272,12 +296,30 @@ async function checkPackageManifests() {
                 `${manifestRel}: ${packageName} declares @donecheck/${depPackage} in dependencies (runtime), but runtime import is not allowed`,
               );
             }
+          } else if (section === "devDependencies") {
+            // devDependencies may carry type-only relationships (e.g.
+            // report-ui peer-depends on shared for types) OR test-only
+            // runtime relationships (e.g. report-ui tests importing
+            // buildJudgementReport from core/rules). The test-only
+            // allow-list is enforced on the source side: only test files
+            // may runtime-import these.
+            if (
+              !runtimeAllowed.has(depPackage) &&
+              !typeOnlyAllowed.has(depPackage) &&
+              !allowedTestRuntime.has(depPackage)
+            ) {
+              failures.push(
+                `${manifestRel}: ${packageName} declares @donecheck/${depPackage} in devDependencies, but neither runtime, type-only, nor test-only import is allowed`,
+              );
+            }
           } else {
-            // devDependencies / peerDependencies may carry type-only
-            // relationships (e.g. report-ui peer-depends on shared for types).
+            // peerDependencies must satisfy runtime or type-only
+            // allow-lists. Test-only relationships are not allowed as
+            // peerDependencies because peerDependencies leak into the
+            // consumer's runtime graph.
             if (!runtimeAllowed.has(depPackage) && !typeOnlyAllowed.has(depPackage)) {
               failures.push(
-                `${manifestRel}: ${packageName} declares @donecheck/${depPackage} in ${section}, but neither runtime nor type-only import is allowed`,
+                `${manifestRel}: ${packageName} declares @donecheck/${depPackage} in peerDependencies, but neither runtime nor type-only import is allowed`,
               );
             }
           }

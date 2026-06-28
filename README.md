@@ -1,6 +1,6 @@
 # DoneCheck
 
-DoneCheck 是一个检测「AI 是否真正完成了需求」的开源工具。本仓库处于阶段 2：在阶段 0 的可复现环境、Monorepo 边界、CI 与合规闸门，以及阶段 1 的 shared 契约层与 core 分析引擎之上，新增第一个真实消费者 CLI，跑通「终端输入需求与证据 → core 分析 → 结构化 DoneCheckResult → 人类可读或 JSON 输出」链路。
+DoneCheck 是一个检测「AI 是否真正完成了需求」的开源工具。本仓库当前已完成到阶段 5：在阶段 0 的可复现环境、Monorepo 边界、CI 与合规闸门之上，逐步叠加了阶段 1 的 shared 契约层与 core 分析引擎、阶段 2 的 CLI 消费者、阶段 3 的语义与静态信号层、阶段 4 的规则引擎与权威 `JudgementReport` 契约，以及阶段 5 的模板库、`report-ui` 展示层与 zh-CN/en 双语 i18n。仓库包含阶段 0～5 的全部能力。
 
 ## 快速开始
 
@@ -41,8 +41,8 @@ direnv allow
 packages/
   shared/      共享类型、常量、Zod schema（含 result/template schema）与工具
   core/        分析引擎 SDK 与阶段 3 语义层，纯 Node，零原生依赖
-  templates/   静态核查模板数据与类型（零运行时依赖，schema 校验在 shared）
-  report-ui/   React 报告组件，只依赖 shared 类型
+  templates/   静态报告展示模板配置与类型（零运行时依赖，schema 校验在 shared）
+  report-ui/   React 报告展示组件，消费 JudgementReport，不做分析
   config/      共享 tsconfig、Biome、tsup 预设
 apps/
   cli/         终端入口，只做参数解析、I/O、展示与退出码映射
@@ -57,8 +57,8 @@ apps/
 - `core` 只依赖 `shared` 与契约校验所需的 `zod`，所有分析逻辑只能放在 `core`，且零原生依赖。
 - `cli` 只运行时依赖 `core`，不在生产代码中运行时 import `shared`；JSON 契约复验只在测试中使用 `shared`。
 - `desktop` 可以依赖 `core` 与 `shared`，也是唯一允许原生依赖 `better-sqlite3` 的位置。
-- `report-ui` 只能使用 `shared` 的**类型**（`import type`），不允许运行时 import `core` 等分析逻辑。
-- `templates` 是零运行时依赖的叶子包（不依赖任何运行时包，包括第三方运行时依赖）；模板 schema 校验在 `shared`。
+- `report-ui` 是纯展示层，不允许运行时 import `core` 或重算规则结果；阶段 5 只接收阶段 4 已生成的 `JudgementReport`。
+- `templates` 是零运行时依赖的叶子包（不依赖任何运行时包，包括第三方运行时依赖）；模板只影响展示区块顺序、默认折叠和高亮关注点，schema 校验在 `shared`。
 
 `nix develop -c pnpm lint` 会运行依赖边界校验与 license 闸门，CI 中同样执行。
 
@@ -133,7 +133,7 @@ nix develop -c node apps/cli/dist/index.js \
 | `status=partial` 且带 `--partial-ok` | `0` |
 | 参数错误、文件不存在、文件读取失败、stdin 缺失、空输入 | `2` |
 
-阶段 2 仍不处理 desktop 持久化与 SQLite。`better-sqlite3` 仍只允许出现在 `apps/desktop`，Electron ABI 重编译与持久化集成留给后续阶段。
+阶段 5 仍不处理 desktop 持久化与 SQLite。`better-sqlite3` 仍只允许出现在 `apps/desktop`，Electron ABI 重编译与持久化集成留给阶段 6。
 
 ## 阶段 1 最小分析链路
 
@@ -243,8 +243,40 @@ scopeDrift.score = extraScopeCount / totalJudgements
 
 ### 后续安排
 
-- 阶段 5 才会在 report-ui / GUI / CLI 展示层处理 zh-CN / en 双语文案映射，阶段 4 只输出稳定 reasonCode 和中性内部 explanation。
+- 阶段 5 在 report-ui 展示层处理 zh-CN / en 双语文案映射，阶段 4 只输出稳定 reasonCode 和中性内部 explanation。
 - “整体 fail 真实 E2E 可达性”属于更后续的 core 规格问题，需要独立设计，不在阶段 4 顺手修改。
+
+## 阶段 5 模板库与报告展示层
+
+阶段 5 新增可复用的报告展示层，目标是让 CLI、desktop 和后续单文件 HTML 导出复用同一份 `JudgementReport + template + locale` 渲染入口。本阶段只处理展示、模板和导出基础，不修改 `@donecheck/core/rules` 的规则语义，也不接入 Electron GUI 主流程。
+
+### 模板库职责
+
+`@donecheck/templates` 从极简默认模板升级为静态展示模板配置库，内置：
+
+- `generic`：通用报告，按总览、风险/亮点、判定列表、调试信息展示。
+- `todo`：偏行动清单，优先展示判定列表，再展示风险/亮点。
+- `frontend`：偏前端核查，提前展开调试信息并突出假实现、需求外范围等 UI 风险。
+
+模板字段只包含 id、词条 key、适用场景、区块顺序、默认折叠区块和高亮关注点。模板不依赖 `report-ui`，不依赖 `core`，不包含 coverage、scopeDrift 或 finalStatus 判断逻辑，也不会改变传入的 report 数据。
+
+### report-ui 职责
+
+`@donecheck/report-ui` 新增 `JudgementReportPage` 与 `createHtmlReportDocument()`：
+
+- `JudgementReportPage` 接收 `JudgementReport`、模板配置和 locale，渲染顶部总览、六状态统计、需求/承诺覆盖率、范围偏离、风险/亮点、判定列表、证据、语义草案和 signals 调试信息。
+- `createHtmlReportDocument()` 生成自包含 HTML 字符串，供阶段 6 的 desktop 内嵌、真实写文件导出和快照测试复用。
+- 组件不调用 LLM、不读写文件、不依赖 Electron API、不重算 coverage / scopeDrift / summaryStats，只按传入报告如实展示。
+
+### 双语边界
+
+阶段 5 仅支持 `zh-CN` 与 `en`。词条在 report-ui 展示层按 `common`、`status`、`report`、`reasonCode`、`template` 分组维护，`reasonCode` 继续保持机器可读、语言无关，由 UI 映射为中文或英文展示文案。未知 reasonCode 会安全降级为“未知原因 / Unknown reason”，缺失词条回退到 key 本身。
+
+双语不进入 `core`、`semantic` 或 `rules`，也不要求规则引擎输出中文 explanation；explanation 保持原始中性文本，UI 优先展示结构化 reasonCode 文案。
+
+### 阶段 6 边界
+
+阶段 6 才会把报告页接入 Electron GUI 主流程，包括桌面端数据流、真实文件导出、内嵌预览、用户选择模板/语言、导出路径选择与 Electron 写文件能力。“整体 fail 真实 E2E 可达性”仍是后续独立 core 规格问题，不属于阶段 5。
 
 ## 常用命令
 

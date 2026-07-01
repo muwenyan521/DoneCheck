@@ -36,10 +36,11 @@ Git hooks 会在提交前运行 `lint-staged`（Biome 格式化 + lint），comm
 - 分析逻辑只放在 `packages/core`。
 - `packages/core` 不允许原生依赖（零原生依赖）。
 - `apps/cli` 与后续消费者层只做参数解析、I/O、展示与退出码映射，不得包含关键词覆盖、status、score 等分析判断逻辑。
-- `apps/cli` 生产代码只允许运行时依赖 `packages/core`；不得运行时 import `packages/shared`，shared 契约复验只能出现在测试中。
-- `apps/desktop` 是唯一允许 `better-sqlite3` 的位置。
+- `apps/cli` 生产代码允许运行时依赖 `packages/core`、`packages/provider-openai`、`packages/report-ui`、`packages/templates`；不得运行时 import `packages/shared`，shared 契约复验只能出现在测试中。
+- `apps/desktop` 允许运行时依赖 `packages/core`、`packages/shared`、`packages/provider-openai`、`packages/report-ui`、`packages/templates`，也是唯一允许 `better-sqlite3` 的位置。
 - `packages/report-ui` 只允许 `import type` 引用 `packages/shared` 的类型，不允许运行时 import。
 - `packages/templates` 是零运行时依赖的叶子包（不依赖任何运行时包，包括第三方运行时依赖如 zod）；模板 schema 校验逻辑在 `packages/shared`。
+- `packages/provider-openai` 是真实 OpenAI LLM provider 实现，零 `@donecheck/*` 运行时依赖；只允许 `import type` 引用 `packages/core` 的 `LLMProvider` 契约。导出 `createProvider()` 工厂（未设置 `OPENAI_API_KEY` 时回退到确定性 mock provider）与 `OpenAIProvider` 类，供 `apps/cli` 与 `apps/desktop` 运行时 import。
 - 禁止引入 GPL/AGPL 等传染性许可证依赖。
 
 ## 契约与分析约定

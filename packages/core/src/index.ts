@@ -177,3 +177,17 @@ function escapeRegExp(value: string): string {
 function roundScore(score: number): number {
   return Math.round(score * 100) / 100;
 }
+
+export * from "./static-signals/index.js";
+export * from "./evidence/index.js";
+export * from "./pipeline/index.js";
+export { buildJudgementReport, evaluateJudgements } from "./rules/index.js";
+export type { JudgementReport } from "./rules/index.js";
+export type {
+  GenerateObjectInput,
+  GenerateObjectResult,
+  LLMPrompt,
+  LLMProvider,
+  LLMProviderMetadata,
+  LLMUsage,
+} from "./semantic/provider.js";

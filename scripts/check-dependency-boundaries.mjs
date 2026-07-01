@@ -14,6 +14,7 @@ const packageByDir = new Map([
   ["packages/core", "core"],
   ["packages/templates", "templates"],
   ["packages/report-ui", "report-ui"],
+  ["packages/provider-openai", "provider-openai"],
   ["packages/config", "config"],
   ["apps/cli", "cli"],
   ["apps/desktop", "desktop"],
@@ -25,18 +26,22 @@ const allowedRuntimeImports = new Map([
   ["core", new Set(["shared"])],
   ["templates", new Set()],
   ["report-ui", new Set()],
+  ["provider-openai", new Set()],
   ["config", new Set()],
-  ["cli", new Set(["core"])],
-  ["desktop", new Set(["core", "shared"])],
+  ["cli", new Set(["core", "provider-openai", "report-ui", "templates"])],
+  ["desktop", new Set(["core", "shared", "provider-openai", "report-ui", "templates"])],
 ]);
 
 // Type-only @donecheck/* imports allowed per package.
 // report-ui may use `import type` from shared, but never a runtime import.
+// templates may use `import type` from shared (zero-runtime-dep leaf).
+// provider-openai may use `import type` from core (LLMProvider contract only).
 const allowedTypeOnlyImports = new Map([
   ["shared", new Set()],
   ["core", new Set(["shared"])],
-  ["templates", new Set()],
+  ["templates", new Set(["shared"])],
   ["report-ui", new Set(["shared"])],
+  ["provider-openai", new Set(["core"])],
   ["config", new Set()],
   ["cli", new Set(["core", "shared"])],
   ["desktop", new Set(["core", "shared"])],

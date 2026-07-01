@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DoneCheck</title>
+  </head>
+  <body>
+    <h1>DoneCheck</h1>
+    <p>Electron shell ready. Use IPC to trigger analysis.</p>
+    <pre id="report">No report loaded.</pre>
+    <script>
+      window.donecheck?.verifyStorage().then((ok) => {
+        document.getElementById("report").textContent = ok
+          ? "storage OK"
+          : "storage FAIL";
+      });
+    </script>
+  </body>
+</html>

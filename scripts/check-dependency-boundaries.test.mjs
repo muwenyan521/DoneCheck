@@ -112,6 +112,74 @@ describe("dependency boundary checker", () => {
     }
   });
 
+  it("allows templates to use `import type` from @donecheck/shared", () => {
+    // Positive test: templates is a zero-runtime-dep leaf that reuses shared
+    // type contracts via type-only imports.
+    const fixture = writeFixture(
+      "packages/templates/src/type-only-allowed.ts",
+      'import type { ReportTemplate } from "@donecheck/shared";\nexport type { ReportTemplate };\n',
+    );
+    try {
+      expect(runChecker()).toContain("Dependency boundaries passed.");
+    } finally {
+      removeFixture(fixture);
+    }
+  });
+
+  it("allows provider-openai to use `import type` from @donecheck/core", () => {
+    // Positive test: provider-openai reuses the LLMProvider contract from
+    // core via type-only imports (zero runtime dep on core).
+    const fixture = writeFixture(
+      "packages/provider-openai/src/type-only-allowed.ts",
+      'import type { LLMProvider } from "@donecheck/core";\nexport type { LLMProvider };\n',
+    );
+    try {
+      expect(runChecker()).toContain("Dependency boundaries passed.");
+    } finally {
+      removeFixture(fixture);
+    }
+  });
+
+  it("allows cli to runtime-import @donecheck/provider-openai, report-ui, templates", () => {
+    // Positive test: CLI --rules/--html mode runtime-imports the real
+    // OpenAI provider, the HTML report renderer, and the default template.
+    const fixture = writeFixture(
+      "apps/cli/src/rules-mode-allowed.ts",
+      'import { OpenAIProvider } from "@donecheck/provider-openai";\nimport { createHtmlReportDocument } from "@donecheck/report-ui";\nimport { defaultTemplate } from "@donecheck/templates";\nexport const x = { OpenAIProvider, createHtmlReportDocument, defaultTemplate };\n',
+    );
+    try {
+      expect(runChecker()).toContain("Dependency boundaries passed.");
+    } finally {
+      removeFixture(fixture);
+    }
+  });
+
+  it("fails when provider-openai runtime-imports @donecheck/core", () => {
+    const fixture = writeFixture(
+      "packages/provider-openai/src/runtime-should-fail.ts",
+      'import { analyze } from "@donecheck/core";\nexport const x = analyze;\n',
+    );
+    try {
+      expect(() => runChecker()).toThrow();
+    } finally {
+      removeFixture(fixture);
+    }
+  });
+
+  it("allows desktop to runtime-import @donecheck/provider-openai, report-ui, templates", () => {
+    // Positive test: desktop Electron IPC runtime-imports the real OpenAI
+    // provider, the HTML report renderer, and the default template.
+    const fixture = writeFixture(
+      "apps/desktop/src/ipc-allowed.ts",
+      'import { createProvider } from "@donecheck/provider-openai";\nimport { createHtmlReportDocument } from "@donecheck/report-ui";\nimport { defaultTemplate } from "@donecheck/templates";\nexport const x = { createProvider, createHtmlReportDocument, defaultTemplate };\n',
+    );
+    try {
+      expect(runChecker()).toContain("Dependency boundaries passed.");
+    } finally {
+      removeFixture(fixture);
+    }
+  });
+
   it("fails when templates uses `import { type X }` mixed with a runtime binding from @donecheck/core", () => {
     const fixture = writeFixture(
       "packages/templates/src/mixed-should-fail.ts",

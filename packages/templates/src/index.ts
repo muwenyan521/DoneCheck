@@ -1,43 +1,13 @@
-export type ReportTemplateId = "frontend" | "generic" | "todo";
+import type { ReportTemplate } from "@donecheck/shared";
 
-export type ReportTemplateScenario = "form" | "frontend" | "generic" | "todo";
-
-export type ReportTemplateSection = "debug" | "judgements" | "overview" | "risk-highlights";
-
-export type ReportTemplateFinalStatus =
-  | "extra-scope"
-  | "fulfilled"
-  | "insufficient-evidence"
-  | "partial"
-  | "suspicious-fake-implementation"
-  | "unfulfilled";
-
-export type ReportTemplateReasonCode =
-  | "extra-scope-detected"
-  | "fake-implementation-signal-detected"
-  | "missing-semantic-draft"
-  | "semantic-fulfilled-with-incomplete-evidence"
-  | "semantic-fulfilled-with-strong-evidence"
-  | "semantic-partial-with-supporting-evidence"
-  | "semantic-unsupported-without-static-support"
-  | "suspicious-without-confirmed-fake-signal"
-  | "weak-or-unstable-evidence";
-
-export interface DoneCheckTemplate {
-  readonly checks?: readonly string[];
-  readonly descriptionKey: string;
-  readonly highlights: {
-    readonly reasonCodes: readonly ReportTemplateReasonCode[];
-    readonly statuses: readonly ReportTemplateFinalStatus[];
-  };
-  readonly id: ReportTemplateId;
-  readonly layout: {
-    readonly defaultCollapsedSections: readonly ReportTemplateSection[];
-    readonly sections: readonly ReportTemplateSection[];
-  };
-  readonly nameKey: string;
-  readonly scenarios: readonly ReportTemplateScenario[];
-}
+export type {
+  ReportTemplate,
+  ReportTemplateFinalStatus,
+  ReportTemplateId,
+  ReportTemplateReasonCode,
+  ReportTemplateScenario,
+  ReportTemplateSection,
+} from "@donecheck/shared";
 
 export const reportTemplates = [
   {
@@ -90,10 +60,10 @@ export const reportTemplates = [
     nameKey: "template.frontend.name",
     scenarios: ["frontend", "form"],
   },
-] as const satisfies readonly DoneCheckTemplate[];
+] as const satisfies readonly ReportTemplate[];
 
 export const defaultTemplate = reportTemplates[0];
 
-export function getTemplateById(id: string): DoneCheckTemplate | undefined {
+export function getTemplateById(id: string): ReportTemplate | undefined {
   return reportTemplates.find((template) => template.id === id);
 }

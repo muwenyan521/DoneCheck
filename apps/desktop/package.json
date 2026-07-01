@@ -14,19 +14,28 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsup --config tsup.config.ts",
+    "build": "tsup --config tsup.config.ts && cp -r src/renderer dist/",
     "lint": "biome check .",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "electron:smoke": "electron --no-sandbox dist/electron.cjs",
+    "electron:start": "electron --no-sandbox dist/electron.cjs"
   },
   "dependencies": {
     "@donecheck/core": "workspace:*",
-    "better-sqlite3": "catalog:"
+    "@donecheck/provider-openai": "workspace:*",
+    "@donecheck/report-ui": "workspace:*",
+    "@donecheck/templates": "workspace:*",
+    "better-sqlite3": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

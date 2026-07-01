@@ -2,11 +2,11 @@ import { buildJudgementReport } from "@donecheck/core/rules";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
-  type FinalJudgementView,
+  type FinalJudgement,
   type JudgementReport,
   JudgementReportPage,
   ReportSummary,
-  type ReportTemplateConfig,
+  type ReportTemplate,
   createHtmlReportDocument,
   translateReasonCode,
 } from "./index.js";
@@ -149,7 +149,7 @@ const report: JudgementReport = {
   warnings: ["One requirement has insufficient evidence."],
 };
 
-const genericTemplate: ReportTemplateConfig = {
+const genericTemplate: ReportTemplate = {
   descriptionKey: "template.generic.description",
   highlights: {
     reasonCodes: [
@@ -168,7 +168,7 @@ const genericTemplate: ReportTemplateConfig = {
   scenarios: ["generic"],
 };
 
-const todoTemplate: ReportTemplateConfig = {
+const todoTemplate: ReportTemplate = {
   ...genericTemplate,
   descriptionKey: "template.todo.description",
   id: "todo",
@@ -180,7 +180,7 @@ const todoTemplate: ReportTemplateConfig = {
   scenarios: ["todo"],
 };
 
-const frontendTemplate: ReportTemplateConfig = {
+const frontendTemplate: ReportTemplate = {
   ...genericTemplate,
   descriptionKey: "template.frontend.description",
   id: "frontend",
@@ -250,7 +250,7 @@ describe("JudgementReportPage", () => {
 
   it("falls back safely for unknown reasonCode and missing translation keys", () => {
     expect(translateReasonCode("unknown-code", "en")).toBe("Unknown reason: unknown-code");
-    const firstJudgement = report.judgements[0] as FinalJudgementView;
+    const firstJudgement = report.judgements[0] as FinalJudgement;
     // Cast through `unknown` because we are deliberately feeding an invalid
     // reasonCode to assert the runtime fallback. The strict shared
     // `ReasonCode` enum normally forbids this — that compile-time safety is
@@ -258,7 +258,7 @@ describe("JudgementReportPage", () => {
     const brokenJudgement = {
       ...firstJudgement,
       reasonCode: "unknown-code",
-    } as unknown as FinalJudgementView;
+    } as unknown as FinalJudgement;
     const markup = renderToStaticMarkup(
       <JudgementReportPage
         locale="en"

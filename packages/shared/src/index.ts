@@ -94,20 +94,71 @@ export function safeParseDoneCheckResult(
 }
 
 /**
- * Template schema + validation. Previously lived in `@donecheck/templates`,
- * but was moved here so `@donecheck/templates` can remain a
- * zero-runtime-dependency leaf package (static data only).
+ * Report template contracts.
+ *
+ * The authoritative `reportTemplateSchema` lives in `@donecheck/shared` so
+ * that `@donecheck/templates` (zero-runtime-dep leaf) and
+ * `@donecheck/report-ui` can `import type` the same shape without diverging.
+ * The literal unions (`ReportTemplateId`, etc.) are also owned here so a
+ * rename or new template id propagates to every consumer at compile time.
  */
-export const templateSchema = z.object({
-  checks: z.array(z.string().min(1)).min(1),
-  id: z.string().min(1),
-  name: z.string().min(1),
+export const reportTemplateIdSchema = z.enum(["frontend", "generic", "todo"]);
+export type ReportTemplateId = z.infer<typeof reportTemplateIdSchema>;
+
+export const reportTemplateScenarioSchema = z.enum(["form", "frontend", "generic", "todo"]);
+export type ReportTemplateScenario = z.infer<typeof reportTemplateScenarioSchema>;
+
+export const reportTemplateSectionSchema = z.enum([
+  "debug",
+  "judgements",
+  "overview",
+  "risk-highlights",
+]);
+export type ReportTemplateSection = z.infer<typeof reportTemplateSectionSchema>;
+
+export const reportTemplateFinalStatusSchema = z.enum([
+  "extra-scope",
+  "fulfilled",
+  "insufficient-evidence",
+  "partial",
+  "suspicious-fake-implementation",
+  "unfulfilled",
+]);
+export type ReportTemplateFinalStatus = z.infer<typeof reportTemplateFinalStatusSchema>;
+
+export const reportTemplateReasonCodeSchema = z.enum([
+  "extra-scope-detected",
+  "fake-implementation-signal-detected",
+  "missing-semantic-draft",
+  "semantic-fulfilled-with-incomplete-evidence",
+  "semantic-fulfilled-with-strong-evidence",
+  "semantic-partial-with-supporting-evidence",
+  "semantic-unsupported-without-static-support",
+  "suspicious-without-confirmed-fake-signal",
+  "weak-or-unstable-evidence",
+]);
+export type ReportTemplateReasonCode = z.infer<typeof reportTemplateReasonCodeSchema>;
+
+export const reportTemplateSchema = z.object({
+  checks: z.array(z.string().trim().min(1)).optional(),
+  descriptionKey: nonEmptyTrimmedString,
+  highlights: z.object({
+    reasonCodes: z.array(reportTemplateReasonCodeSchema),
+    statuses: z.array(reportTemplateFinalStatusSchema),
+  }),
+  id: reportTemplateIdSchema,
+  layout: z.object({
+    defaultCollapsedSections: z.array(reportTemplateSectionSchema),
+    sections: z.array(reportTemplateSectionSchema),
+  }),
+  nameKey: nonEmptyTrimmedString,
+  scenarios: z.array(reportTemplateScenarioSchema),
 });
 
-export type DoneCheckTemplate = z.infer<typeof templateSchema>;
+export type ReportTemplate = z.infer<typeof reportTemplateSchema>;
 
-export function validateTemplate(template: unknown): DoneCheckTemplate {
-  return templateSchema.parse(template);
+export function parseReportTemplate(template: unknown): ReportTemplate {
+  return reportTemplateSchema.parse(template);
 }
 
 export const DONECHECK_SCHEMA_VERSION = "0.0.0";

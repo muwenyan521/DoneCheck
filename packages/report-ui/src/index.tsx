@@ -4,10 +4,9 @@ import type {
   FinalJudgement,
   FinalStatus,
   JudgementReport,
-  ScopeDrift,
+  ReportTemplate,
+  ReportTemplateSection,
   SemanticEvidenceRef,
-  SemanticJudgementDraft,
-  SummaryStats,
 } from "@donecheck/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -27,44 +26,22 @@ export type {
   FinalStatus,
   JudgementReport,
   ReasonCode,
+  ReportTemplate,
+  ReportTemplateFinalStatus,
+  ReportTemplateId,
+  ReportTemplateReasonCode,
+  ReportTemplateScenario,
+  ReportTemplateSection,
   ScopeDrift,
   SemanticEvidenceRef,
   SemanticJudgementDraft,
   SummaryStats,
 } from "@donecheck/shared";
 
-// Backward-compat aliases: keep the historical "View" names pointing at the
-// authoritative shared shapes so consumers importing
-// `FinalJudgementView`/`CoverageResultView`/etc. from `@donecheck/report-ui`
-// stay bound to the same contract.
-export type EvidenceRef = SemanticEvidenceRef;
-export type SemanticDraftView = SemanticJudgementDraft;
-export type FinalJudgementView = FinalJudgement;
-export type CoverageResultView = CoverageResult;
-export type ScopeDriftView = ScopeDrift;
-export type SummaryStatsView = SummaryStats;
-
-export type ReportTemplateSection = "debug" | "judgements" | "overview" | "risk-highlights";
-
-export interface ReportTemplateConfig {
-  readonly descriptionKey: string;
-  readonly highlights: {
-    readonly reasonCodes: readonly string[];
-    readonly statuses: readonly FinalStatus[];
-  };
-  readonly id: string;
-  readonly layout: {
-    readonly defaultCollapsedSections: readonly ReportTemplateSection[];
-    readonly sections: readonly ReportTemplateSection[];
-  };
-  readonly nameKey: string;
-  readonly scenarios: readonly string[];
-}
-
 export interface JudgementReportPageProps {
   readonly locale: Locale;
   readonly report: JudgementReport;
-  readonly template: ReportTemplateConfig;
+  readonly template: ReportTemplate;
 }
 
 export interface HtmlReportDocumentInput extends JudgementReportPageProps {
@@ -381,9 +358,9 @@ function JudgementCard({
   locale,
   template,
 }: {
-  readonly judgement: FinalJudgementView;
+  readonly judgement: FinalJudgement;
   readonly locale: Locale;
-  readonly template: ReportTemplateConfig;
+  readonly template: ReportTemplate;
 }) {
   const highlighted =
     template.highlights.statuses.includes(judgement.finalStatus) ||
@@ -426,11 +403,11 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function formatCoverage(coverage: CoverageResultView, locale: Locale): string {
+function formatCoverage(coverage: CoverageResult, locale: Locale): string {
   return `${formatPercent(coverage.score)} · ${translate("common.denominator", locale)}: ${coverage.denominator} · ${translate("common.totalItems", locale)}: ${coverage.totalItems} · ${translate("common.weightedFulfilled", locale)}: ${coverage.weightedFulfilled} · ${translate("common.excludedInsufficientEvidence", locale)}: ${coverage.excludedInsufficientEvidence}`;
 }
 
-function formatEvidenceRef(ref: EvidenceRef): string {
+function formatEvidenceRef(ref: SemanticEvidenceRef): string {
   return `${ref.filePath}:${ref.lineStart}-${ref.lineEnd} ${ref.snippetSummary}`;
 }
 

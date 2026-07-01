@@ -15,8 +15,10 @@ import {
   parseCheckResult,
   parseDoneCheckResult,
   parseEvidence,
+  parseReportTemplate,
   parseRequirement,
   reasonCodeSchema,
+  reportTemplateSchema,
   requirementSchema,
   safeParseCheck,
   safeParseCheckResult,
@@ -25,10 +27,8 @@ import {
   safeParseRequirement,
   scopeDriftSchema,
   summaryStatsSchema,
-  templateSchema,
-  validateTemplate,
 } from "./index.js";
-import type { FinalJudgement, JudgementReport } from "./index.js";
+import type { FinalJudgement, JudgementReport, ReportTemplate, ReportTemplateId } from "./index.js";
 
 const validRequirement = {
   id: "req-1",
@@ -155,29 +155,49 @@ describe("doneCheckResultSchema", () => {
   });
 });
 
-describe("templateSchema / validateTemplate", () => {
-  it("accepts a valid template", () => {
-    const valid = {
-      checks: ["Evidence demonstrates the requested behavior."],
-      id: "default",
-      name: "Default DoneCheck template",
-    };
+describe("reportTemplateSchema / parseReportTemplate", () => {
+  const valid: ReportTemplate = {
+    descriptionKey: "template.generic.description",
+    highlights: {
+      reasonCodes: ["fake-implementation-signal-detected"],
+      statuses: ["suspicious-fake-implementation"],
+    },
+    id: "generic",
+    layout: {
+      defaultCollapsedSections: ["debug"],
+      sections: ["overview", "judgements", "debug"],
+    },
+    nameKey: "template.generic.name",
+    scenarios: ["generic"],
+  };
 
-    expect(validateTemplate(valid)).toEqual(valid);
+  it("accepts a well-formed template", () => {
+    expect(parseReportTemplate(valid)).toEqual(valid);
   });
 
-  it("rejects a template with an empty checks array", () => {
+  it("accepts optional checks field", () => {
+    expect(parseReportTemplate({ ...valid, checks: ["req-present"] })).toEqual({
+      ...valid,
+      checks: ["req-present"],
+    });
+  });
+
+  it("rejects unknown template id", () => {
+    expect(() => reportTemplateSchema.parse({ ...valid, id: "unknown" })).toThrow();
+  });
+
+  it("rejects unknown reason code", () => {
     expect(() =>
-      templateSchema.parse({
-        checks: [],
-        id: "default",
-        name: "Default DoneCheck template",
+      reportTemplateSchema.parse({
+        ...valid,
+        highlights: { ...valid.highlights, reasonCodes: ["bogus"] },
       }),
     ).toThrow();
   });
 
-  it("rejects a template missing required fields", () => {
-    expect(() => templateSchema.parse({ id: "default" })).toThrow();
+  it("ReportTemplateId is the literal union", () => {
+    const id: ReportTemplateId = "frontend";
+    expect(id).toBe("frontend");
   });
 });
 

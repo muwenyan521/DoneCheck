@@ -4,5 +4,11 @@
     "rootDir": "src"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../../packages/core" }]
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/provider-openai" },
+    { "path": "../../packages/report-ui" },
+    { "path": "../../packages/templates" }
+  ]
 }

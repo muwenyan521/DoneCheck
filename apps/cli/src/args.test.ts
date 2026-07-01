@@ -7,9 +7,11 @@ describe("parseArgs", () => {
       ok: true,
       value: {
         evidence: { kind: "value", value: "CLI built" },
+        html: false,
         json: false,
         partialOk: false,
         requirement: { kind: "value", value: "Build CLI" },
+        rules: false,
       },
     });
   });
@@ -28,9 +30,11 @@ describe("parseArgs", () => {
       ok: true,
       value: {
         evidence: { kind: "file", path: "evidence.md" },
+        html: false,
         json: true,
         partialOk: true,
         requirement: { kind: "file", path: "requirement.md" },
+        rules: false,
       },
     });
   });
@@ -40,9 +44,11 @@ describe("parseArgs", () => {
       ok: true,
       value: {
         evidence: { kind: "stdin" },
+        html: false,
         json: false,
         partialOk: false,
         requirement: { kind: "value", value: "Build CLI" },
+        rules: false,
       },
     });
   });
@@ -83,6 +89,44 @@ describe("parseArgs", () => {
     ).toStrictEqual({
       error: "Use only one explicit evidence source: --evidence or --evidence-file.",
       ok: false,
+    });
+  });
+
+  describe("--rules / --html / --output / --workspace", () => {
+    it("parses --rules", () => {
+      const r = parseArgs(["--requirement", "x", "--rules"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.rules).toBe(true);
+    });
+
+    it("parses --html with --output file", () => {
+      const r = parseArgs(["--requirement", "x", "--html", "--output", "out.html"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.value.html).toBe(true);
+        expect(r.value.output).toBe("out.html");
+      }
+    });
+
+    it("parses --workspace", () => {
+      const r = parseArgs(["--requirement", "x", "--rules", "--workspace", "/tmp/proj"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.workspace).toBe("/tmp/proj");
+    });
+
+    it("rejects --json + --rules together", () => {
+      const r = parseArgs(["--requirement", "x", "--json", "--rules"]);
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects --json + --html together", () => {
+      const r = parseArgs(["--requirement", "x", "--json", "--html"]);
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects --output without --html", () => {
+      const r = parseArgs(["--requirement", "x", "--rules", "--output", "out.html"]);
+      expect(r.ok).toBe(false);
     });
   });
 });

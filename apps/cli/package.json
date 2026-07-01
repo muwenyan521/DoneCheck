@@ -19,12 +19,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@donecheck/core": "workspace:*"
+    "@donecheck/core": "workspace:*",
+    "@donecheck/provider-openai": "workspace:*",
+    "@donecheck/report-ui": "workspace:*",
+    "@donecheck/templates": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",
     "@donecheck/shared": "workspace:*",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

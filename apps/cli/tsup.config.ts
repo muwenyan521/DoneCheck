@@ -8,4 +8,5 @@ export default defineConfig({
   },
   dts: false,
   format: ["esm"],
+  noExternal: ["react", "react-dom"],
 });

@@ -17,9 +17,13 @@ export type EvidenceSource = TextSource | StdinSource;
 
 export interface CliOptions {
   readonly evidence: EvidenceSource;
+  readonly html: boolean;
   readonly json: boolean;
+  readonly output?: string;
   readonly partialOk: boolean;
   readonly requirement: TextSource;
+  readonly rules: boolean;
+  readonly workspace?: string;
 }
 
 export interface ParseSuccess {
@@ -46,6 +50,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   let evidence: EvidenceSource | undefined;
   let json = false;
   let partialOk = false;
+  let rules = false;
+  let html = false;
+  let output: string | undefined;
+  let workspace: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
@@ -100,6 +108,28 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         partialOk = true;
         break;
       }
+      case "--rules": {
+        rules = true;
+        break;
+      }
+      case "--html": {
+        html = true;
+        break;
+      }
+      case "--output": {
+        const value = readOptionValue(argv, index, option);
+        if (!value.ok) return value;
+        output = value.value;
+        index += 1;
+        break;
+      }
+      case "--workspace": {
+        const value = readOptionValue(argv, index, option);
+        if (!value.ok) return value;
+        workspace = value.value;
+        index += 1;
+        break;
+      }
       default: {
         return { error: `Unknown option: ${option}`, ok: false };
       }
@@ -110,13 +140,31 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     return { error: "Missing requirement. Use --requirement or --requirement-file.", ok: false };
   }
 
+  if (json && (rules || html)) {
+    return {
+      error: "--json cannot be combined with --rules or --html.",
+      ok: false,
+    };
+  }
+
+  if (output !== undefined && !html) {
+    return {
+      error: "--output requires --html.",
+      ok: false,
+    };
+  }
+
   return {
     ok: true,
     value: {
       evidence: evidence ?? { kind: "stdin" },
+      html,
       json,
       partialOk,
       requirement,
+      rules,
+      ...(output === undefined ? {} : { output }),
+      ...(workspace === undefined ? {} : { workspace }),
     },
   };
 }

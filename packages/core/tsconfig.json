@@ -4,5 +4,6 @@
     "rootDir": "src"
   },
   "include": ["src/**/*.ts"],
+  "exclude": ["src/**/__fixtures__/**"],
   "references": [{ "path": "../shared" }]
 }

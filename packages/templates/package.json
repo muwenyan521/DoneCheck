@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",
+    "@donecheck/shared": "workspace:*",
     "@types/node": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",

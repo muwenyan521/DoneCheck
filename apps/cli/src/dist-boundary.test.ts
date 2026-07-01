@@ -10,6 +10,8 @@ const productionSourceFiles = [
   path.join(repoRoot, "apps/cli/src/index.ts"),
   path.join(repoRoot, "apps/cli/src/input.ts"),
   path.join(repoRoot, "apps/cli/src/output.ts"),
+  path.join(repoRoot, "apps/cli/src/provider-factory.ts"),
+  path.join(repoRoot, "apps/cli/src/rules-output.ts"),
 ];
 
 describe("dist dependency boundary", () => {
@@ -20,6 +22,11 @@ describe("dist dependency boundary", () => {
 
     expect(packageJson.dependencies).toEqual({
       "@donecheck/core": "workspace:*",
+      "@donecheck/provider-openai": "workspace:*",
+      "@donecheck/report-ui": "workspace:*",
+      "@donecheck/templates": "workspace:*",
+      react: "catalog:",
+      "react-dom": "catalog:",
     });
   });
 

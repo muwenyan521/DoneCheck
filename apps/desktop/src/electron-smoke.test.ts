@@ -5,16 +5,23 @@ import { describe, expect, it, vi } from "vitest";
 let windowCount = 0;
 const handledChannels: string[] = [];
 const loadedFiles: string[] = [];
+const browserWindowOptions: unknown[] = [];
 let queriedWindows = false;
 
 vi.mock("electron", () => ({
   app: {
+    getPath: (name: string) => (name === "userData" ? ":memory:" : "/tmp"),
     whenReady: () => Promise.resolve(),
     on: () => {},
     quit: () => {},
   },
+  dialog: {
+    showOpenDialog: () => Promise.resolve({ canceled: true, filePaths: [] }),
+    showSaveDialog: () => Promise.resolve({ canceled: true }),
+  },
   BrowserWindow: class MockBrowserWindow {
-    constructor() {
+    constructor(options: unknown) {
+      browserWindowOptions.push(options);
       if (!queriedWindows) windowCount += 1;
     }
     static getAllWindows(): MockBrowserWindow[] {
@@ -44,14 +51,40 @@ describe("electron skeleton", () => {
     expect(loadedFiles).toContain("renderer/index.html");
   });
 
-  it("preload exposes DESKTOP_API_KEYS with donecheck:analyze", async () => {
+  it("createMainWindow keeps the Electron renderer security baseline", async () => {
+    browserWindowOptions.length = 0;
+    const mod = await import("./main.js");
+    mod.createMainWindow();
+    expect(browserWindowOptions[0]).toEqual(
+      expect.objectContaining({
+        webPreferences: expect.objectContaining({
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        }),
+      }),
+    );
+  });
+
+  it("preload exposes typed channel keys for analyze, render-html, and history signatures", async () => {
     const mod = await import("./preload.js");
-    expect(mod.DESKTOP_API_KEYS).toContain("donecheck:analyze");
+    expect(mod.DESKTOP_API_KEYS).toEqual(
+      expect.arrayContaining([
+        "donecheck:analyze",
+        "donecheck:render-html",
+        "donecheck:select-workspace",
+        "donecheck:export-html",
+        "donecheck:history:list",
+        "donecheck:history:get",
+        "donecheck:history:save",
+        "donecheck:history:delete",
+      ]),
+    );
   });
 
   it("renderer/index.html exists and references donecheck", () => {
     const html = readFileSync(resolve(import.meta.dirname, "renderer/index.html"), "utf8");
-    expect(html).toContain("donecheck");
+    expect(html).toContain("main.tsx");
   });
 
   it("verifyNativeStorageAvailable still works", async () => {

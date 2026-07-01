@@ -1,9 +1,11 @@
 {
   "extends": "../../packages/config/tsconfig/base.json",
   "compilerOptions": {
-    "rootDir": "src"
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM"],
+    "rootDir": "."
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/types/**/*.d.ts", "vite.config.ts"],
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/shared" },

@@ -1,41 +1,52 @@
-import { runDoneCheckPipelineNode } from "@donecheck/core";
-import type { JudgementReport } from "@donecheck/core";
-import { createProvider } from "@donecheck/provider-openai";
-import { createHtmlReportDocument } from "@donecheck/report-ui";
-import { defaultTemplate } from "@donecheck/templates";
-import { ipcMain } from "electron";
-import { verifyNativeStorageAvailable } from "./index.js";
-
-interface AnalyzeRequest {
-  readonly workspacePath: string;
-  readonly requirement: string;
-  readonly claim?: string;
-}
-
-interface RenderHtmlRequest {
-  readonly report: JudgementReport;
-}
+import { join } from "node:path";
+import { app, dialog, ipcMain } from "electron";
+import { createHistoryStore } from "./history-store.js";
+import type {
+  AnalyzeRequest,
+  ExportHtmlRequest,
+  HistoryDeleteRequest,
+  HistoryGetRequest,
+  HistorySaveRequest,
+  RenderHtmlRequest,
+} from "./ipc-contract.js";
+import { createDesktopIpcHandlers, defaultExportPath } from "./ipc-handlers.js";
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle("donecheck:analyze", async (_event, req: AnalyzeRequest) => {
-    const provider = createProvider();
-    const result = await runDoneCheckPipelineNode({
-      workspacePath: req.workspacePath,
-      requirement: req.requirement,
-      ...(req.claim === undefined ? {} : { claim: req.claim }),
-      provider,
-    });
-    return result.report;
+  const historyStore = createHistoryStore({
+    databasePath: join(app.getPath("userData"), "history.sqlite"),
   });
-
-  ipcMain.handle("donecheck:render-html", async (_event, req: RenderHtmlRequest) => {
-    return createHtmlReportDocument({
-      locale: "en",
-      report: req.report,
-      template: defaultTemplate,
-      title: "DoneCheck Report",
-    });
+  const handlers = createDesktopIpcHandlers({
+    historyStore,
+    saveDialog: async (defaultFileName) => {
+      const result = await dialog.showSaveDialog({
+        defaultPath: defaultExportPath(app.getPath("downloads"), defaultFileName),
+        filters: [{ extensions: ["html"], name: "HTML" }],
+      });
+      return result.canceled ? undefined : result.filePath;
+    },
+    selectDirectory: async () => {
+      const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      return result.canceled ? undefined : result.filePaths[0];
+    },
   });
-
-  ipcMain.handle("donecheck:verify-storage", () => verifyNativeStorageAvailable());
+  ipcMain.handle("donecheck:analyze", (_event: unknown, req: AnalyzeRequest) =>
+    handlers.analyze(req),
+  );
+  ipcMain.handle("donecheck:render-html", (_event: unknown, req: RenderHtmlRequest) =>
+    handlers.renderHtml(req),
+  );
+  ipcMain.handle("donecheck:select-workspace", () => handlers.selectWorkspace());
+  ipcMain.handle("donecheck:export-html", (_event: unknown, req: ExportHtmlRequest) =>
+    handlers.exportHtml(req),
+  );
+  ipcMain.handle("donecheck:history:list", () => handlers.history.list());
+  ipcMain.handle("donecheck:history:get", (_event: unknown, req: HistoryGetRequest) =>
+    handlers.history.get(req),
+  );
+  ipcMain.handle("donecheck:history:save", (_event: unknown, req: HistorySaveRequest) =>
+    handlers.history.save(req),
+  );
+  ipcMain.handle("donecheck:history:delete", (_event: unknown, req: HistoryDeleteRequest) =>
+    handlers.history.delete(req),
+  );
 }

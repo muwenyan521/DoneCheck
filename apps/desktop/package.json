@@ -14,7 +14,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsup --config tsup.config.ts && cp -r src/renderer dist/",
+    "build": "tsup --config tsup.config.ts && vite build --config vite.config.ts",
     "lint": "biome check .",
     "test": "vitest run --testTimeout=10000",
     "test:mocked-smoke": "vitest run --testTimeout=10000 src/electron-smoke.test.ts",
@@ -26,6 +26,7 @@
     "@donecheck/core": "workspace:*",
     "@donecheck/provider-openai": "workspace:*",
     "@donecheck/report-ui": "workspace:*",
+    "@donecheck/shared": "workspace:*",
     "@donecheck/templates": "workspace:*",
     "better-sqlite3": "catalog:",
     "react": "catalog:",
@@ -39,6 +40,7 @@
     "@types/react-dom": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",
+    "vite": "^5.4.21",
     "vitest": "catalog:"
   }
 }

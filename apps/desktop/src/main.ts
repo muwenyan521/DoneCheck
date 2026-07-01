@@ -10,6 +10,7 @@ export function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       preload: resolve(__dirname, "preload.cjs"),
+      sandbox: true,
     },
   });
   win.loadFile(resolve(__dirname, "renderer", "index.html"));

@@ -1,4 +1,4 @@
-import { buildSemanticJudgementPrompt } from "../prompts/semantic-judgement.js";
+import { buildSemanticJudgementPrompt } from "../prompts/index.js";
 import { mapWithConcurrency } from "./limit.js";
 import type { LLMProvider } from "./provider.js";
 import type { RetryOptions } from "./retry.js";

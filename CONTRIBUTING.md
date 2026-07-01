@@ -68,5 +68,6 @@ nix develop -c pnpm --filter @donecheck/desktop electron:smoke
 - shared 契约变更必须同步覆盖合法输入 parse 成功、非法输入 parse 抛错或 safeParse 失败。
 - core 的 `analyze` 必须用 shared 契约校验输入归一化后的数据与输出结果，返回结构化 `DoneCheckResult`。
 - core check 必须是纯函数式规则，不做文件系统、SQLite、网络或 Electron I/O。
+- 所有 LLM prompt 文案、prompt 输出字段说明和 prompt version 常量集中在 `packages/core/src/prompts/`；修改文案只改该目录，调用方统一从 `packages/core/src/prompts/index.ts` 引用。不得把 prompt 文案散落到语义业务逻辑、provider 实现或 schema 文件中。
 - 新增 `@donecheck/*` 运行时依赖关系时，必须同步更新 `scripts/check-dependency-boundaries.mjs` 的包映射、允许列表和负向 fixture；负向 fixture 应由测试或手工验收瞬态写入并删除，不得作为常驻违规源码污染 `nix develop -c pnpm verify`。
 - 新增系统级依赖时，必须修改 `flake.nix` 并显式更新、提交 `flake.lock`；不要依赖未锁定的滚动环境。

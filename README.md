@@ -189,7 +189,9 @@ console.log(result.status, result.score, result.summary);
 
 ### Prompt 与 Provider
 
-阶段 3 prompt 模板放在 `packages/core/src/prompts/*`，每个 prompt 都有版本常量，并与 Zod schema 字段对齐。业务逻辑只依赖统一 `LLMProvider` 抽象，不读取厂商专有响应字段。测试优先使用 mock provider，因此不要求真实联网模型即可验证结构化输出、重试、静态召回和集成薄切片。
+所有 LLM prompt 文案与版本号集中放在 `packages/core/src/prompts/`。改 prompt 文案、版本号或 prompt 输出字段说明时，只改这个目录；调用方统一从 `packages/core/src/prompts/index.ts` 引用，不在语义调用逻辑、provider 或 schema 文件中内联 prompt 文案。每个 prompt 的 `*PromptContract` 必须与对应 Zod schema 字段保持对齐。
+
+阶段 3 prompt 模板每个都有版本常量，并与 Zod schema 字段对齐。业务逻辑只依赖统一 `LLMProvider` 抽象，不读取厂商专有响应字段。测试优先使用 mock provider，因此不要求真实联网模型即可验证结构化输出、重试、静态召回和集成薄切片。
 
 ### 后续阶段边界
 

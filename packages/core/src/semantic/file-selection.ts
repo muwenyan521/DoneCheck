@@ -1,4 +1,4 @@
-import { buildFileSelectionPrompt } from "../prompts/file-selection.js";
+import { buildFileSelectionPrompt } from "../prompts/index.js";
 import type { LLMProvider } from "./provider.js";
 import type { RetryOptions } from "./retry.js";
 import { withRetry } from "./retry.js";

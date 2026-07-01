@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   FILE_SELECTION_PROMPT_VERSION,
   buildFileSelectionPrompt,
-} from "../prompts/file-selection.js";
+  fileSelectionModelOutputPromptContract,
+} from "../prompts/index.js";
 import {
   SEMANTIC_JUDGEMENT_PROMPT_VERSION,
   buildSemanticJudgementPrompt,
-} from "../prompts/semantic-judgement.js";
+  semanticJudgementDraftPromptContract,
+} from "../prompts/index.js";
+import { fileSelectionModelOutputSchema, semanticJudgementDraftSchema } from "./schema.js";
 
 describe("phase 3 prompts", () => {
   it("builds versioned file selection prompts with schema-aligned input fields", () => {
@@ -28,6 +31,19 @@ describe("phase 3 prompts", () => {
     expect(prompt.user).toContain("staticSignals");
     expect(prompt.user).toContain("candidateFiles");
     expect(prompt.user).toContain("warnings");
+
+    const payload = JSON.parse(prompt.user) as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual([
+      "claim",
+      "outputContract",
+      "requirement",
+      "staticSignals",
+      "structureSummary",
+      "topK",
+    ]);
+    expect(fileSelectionModelOutputSchema.keyof().options.sort()).toEqual(
+      Object.keys(fileSelectionModelOutputPromptContract).sort(),
+    );
   });
 
   it("builds versioned semantic judgement prompts with schema-aligned input fields", () => {
@@ -55,5 +71,17 @@ describe("phase 3 prompts", () => {
     expect(prompt.user).toContain("candidateFiles");
     expect(prompt.user).toContain("judgementDraft");
     expect(prompt.user).toContain("repairSuggestion");
+
+    const payload = JSON.parse(prompt.user) as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual([
+      "candidateFiles",
+      "claim",
+      "evidenceSnippets",
+      "outputContract",
+      "requirement",
+    ]);
+    expect(semanticJudgementDraftSchema.keyof().options.sort()).toEqual(
+      Object.keys(semanticJudgementDraftPromptContract).sort(),
+    );
   });
 });

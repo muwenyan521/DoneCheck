@@ -34,7 +34,7 @@ export interface DesktopIpcHandlerDependencies {
 
 const historyNotImplemented = {
   code: "not-implemented",
-  message: "history storage is implemented in milestone 6.3",
+  message: "history store dependency was not provided",
 } as const;
 
 export function createDesktopIpcHandlers(

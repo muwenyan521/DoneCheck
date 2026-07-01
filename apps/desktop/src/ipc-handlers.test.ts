@@ -2,9 +2,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateObjectInput, GenerateObjectResult, LLMProvider } from "@donecheck/core";
+import type { JudgementReport } from "@donecheck/shared";
 import { describe, expect, it } from "vitest";
 import { createHistoryStore } from "./history-store.js";
 import { createDesktopIpcHandlers, injectDesktopExportStyles } from "./ipc-handlers.js";
+
+const externalResourceMatchers = [
+  /<script\b/iu,
+  /<link\s+[^>]*rel=["']stylesheet["'][^>]*>/iu,
+  /\b(?:href|src)=["']https?:\/\//iu,
+  /url\(\s*["']?https?:\/\//iu,
+] as const;
 
 const realPipelineProvider: LLMProvider = {
   async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
@@ -77,11 +85,28 @@ describe("desktop IPC handlers", () => {
         sourceId: expect.any(String),
       }),
     );
-    expect(result.data.judgements.flatMap((judgement) => judgement.signals.staticSignals)).toEqual(
+    const targetJudgement = result.data.judgements.find((judgement) =>
+      judgement.signals.staticSignals.some(
+        (signal) => signal.filePath === "src/login.ts" && signal.keyword === "localStorage",
+      ),
+    );
+    expect(targetJudgement).toBeDefined();
+    if (targetJudgement === undefined) throw new Error("missing target judgement");
+    expect(targetJudgement.signals.staticSignals.length).toBeGreaterThan(0);
+    expect(targetJudgement.signals.staticSignals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ filePath: "src/login.ts", keyword: "localStorage" }),
       ]),
     );
+    expect(targetJudgement.evidenceRefs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ filePath: "src/login.ts" })]),
+    );
+    for (const signal of targetJudgement.signals.staticSignals) {
+      expect(
+        signal.filePath === targetJudgement.sourceId ||
+          targetJudgement.evidenceRefs.some((ref) => ref.filePath === signal.filePath),
+      ).toBe(true);
+    }
   });
 
   it("renderHtml returns a self-contained report document for a real report", async () => {
@@ -102,9 +127,64 @@ describe("desktop IPC handlers", () => {
     expect(html.data.html).toContain("DoneCheck");
     expect(html.data.html).toContain("判定列表");
     expect(html.data.html).toContain('<style data-donecheck-desktop-export="true">');
-    expect(html.data.html).not.toContain('<link rel="stylesheet"');
-    expect(html.data.html).not.toContain("<script");
-    expect(html.data.html).not.toMatch(/https?:\/\//u);
+    for (const matcher of externalResourceMatchers) {
+      expect(html.data.html).not.toMatch(matcher);
+    }
+  });
+
+  it("keeps export style selectors aligned with real report DOM attributes", async () => {
+    const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
+    const analyzed = await handlers.analyze({
+      workspaceDir: await createWorkspace(),
+      requirement: "User can log in and persist a session.",
+      claim: "The login function stores a session token in localStorage.",
+      options: { generatedAt: "2026-07-01T00:00:00.000Z" },
+    });
+    if (!analyzed.ok) throw new Error(analyzed.error.message);
+
+    const html = await handlers.renderHtml({ report: analyzed.data, templateId: "todo" });
+
+    expect(html.ok).toBe(true);
+    if (!html.ok) throw new Error(html.error.message);
+    expect(html.data.html).toContain("article[data-locale]");
+    expect(html.data.html).toContain('article article[data-highlighted="true"]');
+    expect(html.data.html).toContain('article article[data-kind="extra-scope"]');
+    expect(html.data.html).toContain('data-locale="zh-CN"');
+    expect(html.data.html).toContain('data-highlighted="true"');
+    expect(html.data.html).toContain('data-kind="extra-scope"');
+  });
+
+  it("treats report text URLs as self-contained content while blocking external resources", async () => {
+    const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
+    const analyzed = await handlers.analyze({
+      workspaceDir: await createWorkspace(),
+      requirement: "User can log in and persist a session. See https://example.com/spec.",
+      claim: "The login function stores a session token in localStorage for http://localhost/docs.",
+      options: { generatedAt: "2026-07-01T00:00:00.000Z" },
+    });
+    if (!analyzed.ok) throw new Error(analyzed.error.message);
+
+    const reportWithTextUrls: JudgementReport = {
+      ...analyzed.data,
+      warnings: ["External references are plain text: https://example.com/spec"],
+      judgements: analyzed.data.judgements.map((judgement, index) =>
+        index === 0
+          ? {
+              ...judgement,
+              explanation: `${judgement.explanation} See http://localhost/docs for operator notes.`,
+            }
+          : judgement,
+      ),
+    };
+    const html = await handlers.renderHtml({ report: reportWithTextUrls });
+
+    expect(html.ok).toBe(true);
+    if (!html.ok) throw new Error(html.error.message);
+    expect(html.data.html).toContain("https://example.com/spec");
+    expect(html.data.html).toContain("http://localhost/docs");
+    for (const matcher of externalResourceMatchers) {
+      expect(html.data.html).not.toMatch(matcher);
+    }
   });
 
   it("injects desktop export styles idempotently and tolerates head casing", () => {
@@ -229,7 +309,7 @@ describe("desktop IPC handlers", () => {
       ok: false,
       error: {
         code: "not-implemented",
-        message: "history storage is implemented in milestone 6.3",
+        message: "history store dependency was not provided",
       },
     });
     expect(typeof handlers.history.get).toBe("function");

@@ -68,6 +68,14 @@ describe("orchestrateAnalysis", () => {
     expect(result.report.version).toBe("rules-v1");
     expect(result.report.judgements.length).toBeGreaterThan(0);
     expect(result.staticSignals.length).toBeGreaterThan(0);
+    const reportStaticSignals = result.report.judgements.flatMap(
+      (judgement) => judgement.signals.staticSignals,
+    );
+    expect(reportStaticSignals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ filePath: "src/login.ts", keyword: "localStorage" }),
+      ]),
+    );
     expect(result.fakeImplementationSignals.some((s) => s.pattern === "alert-only")).toBe(true);
     expect(result.selectedFiles).toContain("src/login.ts");
     expect(result.evidenceSnippets.length).toBeGreaterThan(0);

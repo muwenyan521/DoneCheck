@@ -19,7 +19,11 @@ export function runDesktopAnalysis(request: DesktopAnalysisRequest) {
  * that never actually loads the native dependency.
  */
 export function verifyNativeStorageAvailable(): boolean {
-  const db = new Database(":memory:");
+  return verifyDesktopStorage({ databasePath: ":memory:" });
+}
+
+export function verifyDesktopStorage(input: { readonly databasePath: string }): boolean {
+  const db = new Database(input.databasePath);
   try {
     db.exec("CREATE TABLE smoke (id INTEGER PRIMARY KEY)");
     db.prepare("INSERT INTO smoke (id) VALUES (?)").run(1);

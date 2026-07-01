@@ -24,6 +24,26 @@ nix develop -c pnpm verify
 
 Git hooks 会在提交前运行 `lint-staged`（Biome 格式化 + lint），commit message 使用 Conventional Commits。全量 typecheck / test / build 由 `nix develop -c pnpm verify` 与 CI 负责，不在 pre-commit 中重复执行。
 
+## Desktop smoke 验收边界
+
+仓库默认依赖不包含 Electron 二进制，CI 默认覆盖的是 mocked unit smoke，不覆盖真实 Electron 进程。
+
+```bash
+nix develop -c pnpm --filter @donecheck/desktop test:mocked-smoke
+```
+
+这条命令使用 `vi.mock("electron")`，只验证 main/preload/renderer/smoke 骨架、最小窗口路径和 smoke IPC 注册，不得在复核记录中称为“真实 Electron smoke”。
+
+真实 Electron smoke 是本地手动验收路径：
+
+```bash
+nix develop -c pnpm --filter @donecheck/desktop add -D electron
+nix develop -c pnpm --filter @donecheck/desktop build
+nix develop -c pnpm --filter @donecheck/desktop electron:smoke
+```
+
+预期输出为 `electron:smoke OK`，命令会启动真实 Electron、创建最小窗口、加载 renderer、注册一条最小 IPC 后退出。由于 Electron 未进入默认 devDependencies，这条路径不属于 CI 默认闸门。
+
 ## TTY 验收测试规范
 
 模拟 TTY 验收测试时必须禁用 `script -qfec` 命令。

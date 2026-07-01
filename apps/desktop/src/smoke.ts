@@ -1,16 +1,19 @@
-import { app } from "electron";
-import { verifyNativeStorageAvailable } from "./index.js";
+import { BrowserWindow, app, ipcMain } from "electron";
+import { createMainWindow } from "./main.js";
 
-app.whenReady().then(() => {
+export function runElectronSmoke(): void {
   try {
-    const ok = verifyNativeStorageAvailable();
-    if (!ok) {
-      throw new Error("better-sqlite3 smoke failed");
-    }
+    ipcMain.handle("donecheck:verify-smoke", () => "ipc-ok");
+    createMainWindow();
+    if (BrowserWindow.getAllWindows().length < 1) throw new Error("window smoke failed");
     console.log("electron:smoke OK");
   } catch (error) {
     console.error("electron:smoke FAIL", error);
     process.exitCode = 1;
   }
   app.quit();
-});
+}
+
+if (!process.env.VITEST) {
+  app.whenReady().then(runElectronSmoke);
+}

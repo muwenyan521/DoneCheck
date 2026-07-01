@@ -315,9 +315,16 @@ OPENAI_API_KEY=sk-... nix develop -c node apps/cli/dist/index.js \
 
 ## Electron Shell
 
-阶段 6 预备工作在 `apps/desktop` 内新增最小 Electron 骨架：`main.ts`（窗口创建）、`preload.ts`（contextBridge 暴露 `window.donecheck`）、`ipc.ts`（三个 IPC 通道委派到 core / report-ui）、`smoke.ts`（启动 Electron 并校验 better-sqlite3）。`contextIsolation: true`、`nodeIntegration: false`，preload 与 main 均为 CJS。
+阶段 6 预备工作在 `apps/desktop` 内新增最小 Electron 骨架：`main.ts`（窗口创建）、`preload.ts`（contextBridge 暴露 `window.donecheck`）、`ipc.ts`（三个 IPC 通道委派到 core / report-ui）、`smoke.ts`（真实 Electron smoke 入口）。`contextIsolation: true`、`nodeIntegration: false`，preload 与 main 均为 CJS。
 
-为避免在 `pnpm install` 阶段下载 Electron 二进制（影响 CI 与离线开发），`electron` 与 `@electron/rebuild` **未**加入 devDependencies。Electron 类型由本地 `apps/desktop/src/types/electron.d.ts` 声明，测试用 `vi.mock("electron")` 覆盖。要本地运行 Electron smoke，需手动安装 Electron：
+当前仓库选择 **方案 B：默认依赖不纳入 Electron 二进制**。为避免在 `pnpm install` 阶段下载 Electron 二进制（影响 CI 与离线开发），`electron` 与 `@electron/rebuild` **未**加入 devDependencies。Electron 类型由本地 `apps/desktop/src/types/electron.d.ts` 声明。
+
+desktop 验收分两层，不能混用口径：
+
+- mocked unit smoke：`nix develop -c pnpm --filter @donecheck/desktop test:mocked-smoke`，使用 `vi.mock("electron")` 验证 main/preload/renderer/smoke 骨架、最小窗口路径和 smoke IPC 注册；这是 CI 默认可跑的单测，不是真实 Electron 进程。
+- real manual smoke：`nix develop -c pnpm --filter @donecheck/desktop electron:smoke`，必须先手动安装 Electron，启动真实 Electron、创建最小窗口、加载 renderer，并注册一条最小 IPC 后退出；这不是 CI 默认路径。
+
+要本地运行真实 Electron smoke，需手动安装 Electron：
 
 ```bash
 nix develop -c pnpm --filter @donecheck/desktop add -D electron
@@ -326,7 +333,7 @@ nix develop -c pnpm --filter @donecheck/desktop electron:smoke
 # 期望输出：electron:smoke OK
 ```
 
-`electron:smoke` 启动 Electron、校验 better-sqlite3 原生存储可用后立即退出，不打开 GUI 主循环。better-sqlite3 的 Electron ABI 重编译与持久化集成留给阶段 6。
+`electron:smoke` 指向 `dist/smoke.cjs`，只做真实 Electron 壳验收：启动 Electron、创建窗口、加载 `renderer/index.html`、注册 `donecheck:verify-smoke` IPC 后立即退出，不进入 GUI 主开发。better-sqlite3 的 Electron ABI 重编译与持久化集成留给阶段 6。
 
 ## 常用命令
 

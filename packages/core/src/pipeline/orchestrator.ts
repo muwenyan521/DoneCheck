@@ -1,6 +1,10 @@
 import { extractEvidenceSnippets } from "../evidence/snippet.js";
 import { buildJudgementReport } from "../rules/index.js";
-import type { FakeImplementationSignal, JudgementReport } from "../rules/schema.js";
+import type {
+  FakeImplementationSignal,
+  JudgementReport,
+  TargetedStaticSignal,
+} from "../rules/schema.js";
 import { selectCandidateFiles } from "../semantic/file-selection.js";
 import type { LLMProvider } from "../semantic/provider.js";
 import type { EvidenceSnippet, StaticSignal } from "../semantic/schema.js";
@@ -107,7 +111,7 @@ export async function orchestrateAnalysis(
     claims,
     extraScopeCandidates: [],
     fakeImplementationSignals,
-    staticSignals: [],
+    staticSignals: targetStaticSignals(staticSignals),
     semanticDrafts: drafts,
     generatedAt: input.generatedAt,
   });
@@ -119,4 +123,8 @@ export async function orchestrateAnalysis(
     selectedFiles: selection.candidateFiles,
     evidenceSnippets,
   };
+}
+
+function targetStaticSignals(signals: readonly StaticSignal[]): TargetedStaticSignal[] {
+  return signals.map((signal) => ({ ...signal }));
 }

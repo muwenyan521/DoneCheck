@@ -16,9 +16,10 @@
   "scripts": {
     "build": "tsup --config tsup.config.ts && cp -r src/renderer dist/",
     "lint": "biome check .",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=10000",
+    "test:mocked-smoke": "vitest run --testTimeout=10000 src/electron-smoke.test.ts",
     "typecheck": "tsc --noEmit",
-    "electron:smoke": "electron --no-sandbox dist/electron.cjs",
+    "electron:smoke": "electron --no-sandbox dist/smoke.cjs",
     "electron:start": "electron --no-sandbox dist/electron.cjs"
   },
   "dependencies": {

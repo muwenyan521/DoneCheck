@@ -80,5 +80,13 @@ describe("e2e: full pipeline over sample-project fixture", () => {
     expect(patterns).toContain("not-implemented");
     expect(result.selectedFiles).toContain("src/login.ts");
     expect(result.staticSignals.some((s) => s.keyword === "localStorage")).toBe(true);
+    const reportStaticSignals = result.report.judgements.flatMap(
+      (judgement) => judgement.signals.staticSignals,
+    );
+    expect(reportStaticSignals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ filePath: "src/login.ts", keyword: "localStorage" }),
+      ]),
+    );
   });
 });

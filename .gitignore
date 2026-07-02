@@ -4,6 +4,7 @@ dist/
 coverage/
 .direnv/
 .cache/
+.worktrees/
 .env
 .env.*
 !.envrc

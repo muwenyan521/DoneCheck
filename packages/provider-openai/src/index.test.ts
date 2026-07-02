@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { OpenAIProvider, ProviderConfigError, createProvider } from "./index.js";
+import {
+  OpenAIProvider,
+  ProviderConfigError,
+  createDeterministicMockProvider,
+  createProvider,
+  resolveOpenAIProviderConfig,
+} from "./index.js";
 
 describe("OpenAIProvider", () => {
   it("throws ProviderConfigError when OPENAI_API_KEY missing", () => {
@@ -9,7 +15,7 @@ describe("OpenAIProvider", () => {
     try {
       expect(() => new OpenAIProvider()).toThrow(ProviderConfigError);
     } finally {
-      if (old) process.env.OPENAI_API_KEY = old;
+      restoreEnv("OPENAI_API_KEY", old);
     }
   });
 
@@ -68,6 +74,124 @@ describe("OpenAIProvider", () => {
     expect(result.usage.outputTokens).toBe(5);
     expect(result.usage.totalTokens).toBe(15);
   });
+
+  it("uses OPENAI_API_KEY, OPENAI_BASE_URL, and OPENAI_MODEL when configured", async () => {
+    const oldOpenAIKey = process.env.OPENAI_API_KEY;
+    const oldBaseUrl = process.env.OPENAI_BASE_URL;
+    const oldModel = process.env.OPENAI_MODEL;
+    process.env.OPENAI_API_KEY = "sk-test";
+    process.env.OPENAI_BASE_URL = "https://example.test/v1";
+    process.env.OPENAI_MODEL = "gpt-test";
+    try {
+      expect(resolveOpenAIProviderConfig()).toEqual({
+        apiKey: "sk-test",
+        apiKeySource: "OPENAI_API_KEY",
+        baseURL: "https://example.test/v1",
+        model: "gpt-test",
+      });
+    } finally {
+      restoreEnv("OPENAI_API_KEY", oldOpenAIKey);
+      restoreEnv("OPENAI_BASE_URL", oldBaseUrl);
+      restoreEnv("OPENAI_MODEL", oldModel);
+    }
+  });
+
+  it("prefers explicit options over environment config", () => {
+    const old = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-test";
+    try {
+      expect(
+        resolveOpenAIProviderConfig({
+          apiKey: "explicit-key",
+          baseURL: "https://explicit.test/v1",
+          model: "explicit-model",
+        }),
+      ).toEqual({
+        apiKey: "explicit-key",
+        apiKeySource: "options.apiKey",
+        baseURL: "https://explicit.test/v1",
+        model: "explicit-model",
+      });
+    } finally {
+      restoreEnv("OPENAI_API_KEY", old);
+    }
+  });
+});
+
+describe("createDeterministicMockProvider", () => {
+  it("selects static-signal files and returns semantic evidence refs from real prompt snippets", async () => {
+    const provider = createDeterministicMockProvider();
+    const z = await import("zod");
+
+    const selection = await provider.generateObject({
+      prompt: {
+        system: "s",
+        user: JSON.stringify({
+          staticSignals: [{ filePath: "src/LoginForm.tsx", strength: "strong" }],
+          structureSummary: "src/LoginForm.tsx (10 lines)\nsrc/Other.tsx (2 lines)",
+        }),
+        version: "v1",
+      },
+      schema: z.object({
+        candidateFiles: z.array(z.string()),
+        confidence: z.number(),
+        reasoningSummary: z.string(),
+        warnings: z.array(z.string()),
+      }),
+      schemaName: "FileSelectionModelOutput",
+    });
+    expect(selection.object).toMatchObject({
+      candidateFiles: ["src/LoginForm.tsx", "src/Other.tsx"],
+    });
+
+    const judgement = await provider.generateObject({
+      prompt: {
+        system: "s",
+        user: JSON.stringify({
+          evidenceSnippets: [
+            {
+              filePath: "src/LoginForm.tsx",
+              lineStart: 1,
+              lineEnd: 10,
+              summary: "login snippet",
+              text: "localStorage.setItem('session', token)",
+            },
+          ],
+          requirement: { id: "REQ-1", text: "Implement login" },
+        }),
+        version: "v1",
+      },
+      schema: z.object({
+        confidence: z.number(),
+        evidenceRefs: z
+          .array(
+            z.object({
+              filePath: z.string(),
+              lineStart: z.number(),
+              lineEnd: z.number(),
+              snippetSummary: z.string(),
+            }),
+          )
+          .min(1),
+        explanation: z.string(),
+        judgementDraft: z.enum(["fulfilled", "partial", "unsupported", "suspicious"]),
+        matchedRequirementId: z.string().optional(),
+        repairSuggestion: z.string(),
+      }),
+      schemaName: "SemanticJudgementDraft",
+    });
+
+    expect(judgement.object).toMatchObject({
+      evidenceRefs: [
+        {
+          filePath: "src/LoginForm.tsx",
+          lineStart: 1,
+          lineEnd: 10,
+        },
+      ],
+      matchedRequirementId: "REQ-1",
+    });
+  });
 });
 
 describe("createProvider factory", () => {
@@ -99,3 +223,11 @@ describe("createProvider factory", () => {
     }
   });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}

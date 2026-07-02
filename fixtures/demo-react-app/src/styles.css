@@ -1,0 +1,29 @@
+.app-shell {
+  display: grid;
+  gap: 1rem;
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 2rem;
+}
+
+.hero,
+.card {
+  border: 1px solid #d7dae0;
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.billing-panel {
+  border-color: #f0c36d;
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    padding: 1rem;
+  }
+}

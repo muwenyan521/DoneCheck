@@ -18,21 +18,12 @@ export function LoginForm() {
       <h2>Email login</h2>
       <label>
         Email
-        <input
-          autoComplete="email"
-          onChange={(event) => setEmail(event.currentTarget.value)}
-          required
-          type="email"
-          value={email}
-        />
+        <input onChange={(e) => setEmail(e.currentTarget.value)} type="email" value={email} />
       </label>
       <label>
         Password
         <input
-          autoComplete="current-password"
-          minLength={8}
-          onChange={(event) => setPassword(event.currentTarget.value)}
-          required
+          onChange={(e) => setPassword(e.currentTarget.value)}
           type="password"
           value={password}
         />

@@ -1,4 +1,5 @@
 export { selectCandidateFiles } from "./file-selection.js";
+export { decomposeRequirements } from "./requirement-decomposition.js";
 export { draftSemanticJudgement, draftSemanticJudgements } from "./semantic-judgement.js";
 export type {
   GenerateObjectInput,
@@ -8,6 +9,7 @@ export type {
   LLMPrompt,
   LLMUsage,
 } from "./provider.js";
+export type { RequirementDecompositionOutput } from "./requirement-decomposition-schema.js";
 export type {
   CandidateFileMetadata,
   EvidenceSnippet,

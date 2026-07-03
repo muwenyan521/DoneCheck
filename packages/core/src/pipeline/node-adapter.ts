@@ -2,6 +2,7 @@ import type { Stats } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { relative } from "node:path";
 import type { LLMProvider } from "../semantic/provider.js";
+import type { SemanticClaim, SemanticRequirement } from "../semantic/schema.js";
 import { orchestrateAnalysis } from "./orchestrator.js";
 
 const DEFAULT_IGNORE = new Set(["node_modules", "dist", ".git", ".cache", "build", "coverage"]);
@@ -12,6 +13,8 @@ export interface RunDoneCheckPipelineNodeInput {
   readonly claim?: string;
   readonly provider: LLMProvider;
   readonly generatedAt?: string;
+  readonly claims?: readonly SemanticClaim[];
+  readonly requirements?: readonly SemanticRequirement[];
   readonly topK?: number;
   readonly ignore?: readonly string[];
 }
@@ -23,6 +26,8 @@ export async function runDoneCheckPipelineNode(input: RunDoneCheckPipelineNodeIn
   return orchestrateAnalysis({
     requirement: input.requirement,
     ...(input.claim === undefined ? {} : { claim: input.claim }),
+    ...(input.claims === undefined ? {} : { claims: input.claims }),
+    ...(input.requirements === undefined ? {} : { requirements: input.requirements }),
     files,
     provider: input.provider,
     generatedAt: input.generatedAt ?? new Date().toISOString(),

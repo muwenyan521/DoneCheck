@@ -45,6 +45,56 @@ const mockProvider: LLMProvider = {
   },
 };
 
+const multiProvider: LLMProvider = {
+  async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+    if (input.schemaName === "FileSelectionModelOutput") {
+      return {
+        object: input.schema.parse({
+          candidateFiles: ["src/login.ts", "src/export.ts"],
+          confidence: 0.9,
+          reasoningSummary: "selected source files",
+          warnings: [],
+        }) as T,
+        metadata: { provider: "mock", model: "mock", retries: 0 },
+        usage: {},
+      };
+    }
+    if (input.schemaName === "SemanticJudgementDraft") {
+      const payload = JSON.parse(input.prompt.user) as {
+        requirement: { id: string; text: string };
+        claim?: { id: string; text: string };
+      };
+      const isLogin = payload.requirement.text.toLowerCase().includes("login");
+      const filePath = isLogin
+        ? "src/login.ts"
+        : payload.requirement.text.toLowerCase().includes("export")
+          ? "src/export.ts"
+          : "src/todo.ts";
+      return {
+        object: input.schema.parse({
+          confidence: 0.9,
+          evidenceRefs: [
+            {
+              filePath,
+              lineStart: 1,
+              lineEnd: 1,
+              snippetSummary: isLogin ? "login implementation" : "export placeholder",
+            },
+          ],
+          explanation: isLogin ? "login is implemented" : "export is fake",
+          judgementDraft: isLogin ? "fulfilled" : "partial",
+          matchedClaimId: payload.claim?.id,
+          matchedRequirementId: payload.requirement.id,
+          repairSuggestion: isLogin ? "none" : "replace placeholder export",
+        }) as T,
+        metadata: { provider: "mock", model: "mock", retries: 0 },
+        usage: {},
+      };
+    }
+    throw new Error(`unexpected schema ${input.schemaName}`);
+  },
+};
+
 describe("orchestrateAnalysis", () => {
   it("chains static-signals + selection + drafting + rules", async () => {
     const result = await orchestrateAnalysis({
@@ -80,5 +130,154 @@ describe("orchestrateAnalysis", () => {
     expect(result.selectedFiles).toContain("src/login.ts");
     expect(result.evidenceSnippets.length).toBeGreaterThan(0);
     expect(result.report.summaryStats["suspicious-fake-implementation"]).toBeGreaterThanOrEqual(0);
+  });
+
+  it("supports multi-item inputs and targets fake signals to related items", async () => {
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement login.\nREQ-3: Implement CSV export.",
+      claim: "CLAIM-1: Login is implemented.\nCLAIM-3: CSV export is implemented.",
+      requirements: [
+        { id: "REQ-1", text: "Implement login." },
+        { id: "REQ-3", text: "Implement CSV export." },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "Login is implemented." },
+        { id: "CLAIM-3", text: "CSV export is implemented." },
+      ],
+      files: [
+        {
+          relativePath: "src/login.ts",
+          content: "export function login() { localStorage.setItem('x','1'); }",
+        },
+        {
+          relativePath: "src/export.ts",
+          content: "export function exportCsv() { alert('not implemented'); }",
+        },
+      ],
+      provider: multiProvider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const login = result.report.judgements.find(
+      (judgement) => judgement.id === "requirement:REQ-1",
+    );
+    const csv = result.report.judgements.find((judgement) => judgement.id === "requirement:REQ-3");
+    expect(result.report.judgements.length).toBe(4);
+    expect(login?.finalStatus).not.toBe("suspicious-fake-implementation");
+    expect(csv?.finalStatus).toBe("suspicious-fake-implementation");
+    expect(csv?.signals.fakeImplementationSignals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ filePath: "src/export.ts", targetId: "REQ-3" }),
+      ]),
+    );
+  });
+
+  it("creates extra-scope candidates from unmatched additive claims", async () => {
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement todo tracking without billing controls.",
+      claim:
+        "CLAIM-1: Todo tracking is implemented.\nCLAIM-2: I also added subscription billing controls.",
+      requirements: [{ id: "REQ-1", text: "Implement todo tracking without billing controls." }],
+      claims: [
+        { id: "CLAIM-1", text: "Todo tracking is implemented." },
+        { id: "CLAIM-2", text: "I also added subscription billing controls." },
+      ],
+      files: [
+        {
+          relativePath: "src/todo.ts",
+          content: "export function addTodo() { localStorage.setItem('todos','[]'); }",
+        },
+      ],
+      provider: multiProvider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    expect(result.report.summaryStats["extra-scope"]).toBe(1);
+    expect(result.report.scopeDrift.extraScopeCount).toBe(1);
+  });
+
+  it("offers granular evidence snippets so exact provider evidence refs can pass validation", async () => {
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement login.",
+      claim: "CLAIM-1: Login is implemented.",
+      requirements: [{ id: "REQ-1", text: "Implement login." }],
+      claims: [{ id: "CLAIM-1", text: "Login is implemented." }],
+      files: [
+        {
+          relativePath: "src/login.ts",
+          content: Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n"),
+        },
+      ],
+      provider: {
+        async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+          if (input.schemaName === "FileSelectionModelOutput") {
+            return {
+              object: input.schema.parse({ candidateFiles: ["src/login.ts"] }) as T,
+              metadata: { provider: "mock", model: "mock", retries: 0 },
+              usage: {},
+            };
+          }
+          return {
+            object: input.schema.parse({
+              confidence: 0.9,
+              evidenceRefs: [
+                {
+                  filePath: "src/login.ts",
+                  lineEnd: 12,
+                  lineStart: 8,
+                  snippetSummary: "exact provider range",
+                },
+              ],
+              explanation: "provider chose an exact subrange",
+              judgementDraft: "fulfilled",
+              matchedClaimId: "CLAIM-1",
+              matchedRequirementId: "REQ-1",
+              repairSuggestion: "none",
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        },
+      },
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    expect(result.evidenceSnippets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ filePath: "src/login.ts", lineStart: 8, lineEnd: 12 }),
+      ]),
+    );
+    expect(result.report.judgements[0]?.evidenceRefs).toEqual([
+      expect.objectContaining({ filePath: "src/login.ts", lineStart: 8, lineEnd: 12 }),
+    ]);
+  });
+
+  it("deduplicates requirements and claims by id to avoid duplicate judgement ids", async () => {
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement login.",
+      claim: "CLAIM-1: Login is implemented.",
+      requirements: [
+        { id: "REQ-1", text: "Implement login." },
+        { id: "REQ-1", text: "Implement login." },
+        { id: "REQ-1", text: "Implement login." },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "Login is implemented." },
+        { id: "CLAIM-1", text: "Login is implemented." },
+      ],
+      files: [
+        {
+          relativePath: "src/login.ts",
+          content: "export function login() { localStorage.setItem('x','1'); }",
+        },
+      ],
+      provider: multiProvider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const ids = result.report.judgements.map((j) => j.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(result.report.judgements.filter((j) => j.id === "requirement:REQ-1").length).toBe(1);
+    expect(result.report.judgements.filter((j) => j.id === "claim:CLAIM-1").length).toBe(1);
   });
 });

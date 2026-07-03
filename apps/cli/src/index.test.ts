@@ -129,6 +129,133 @@ describe("runCli --rules / --html", () => {
     }
   });
 
+  it("returns 0 for --rules structural demo output even when report contains findings", async () => {
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run(
+        [
+          "--requirement",
+          "REQ-1: Implement app module",
+          "--evidence",
+          "CLAIM-1: App module is implemented",
+          "--rules",
+          "--workspace",
+          workspace,
+        ],
+        { provider: findingProvider },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(judgementReportSchema.parse(JSON.parse(result.stdout)).summaryStats).toMatchObject({
+        unfulfilled: 2,
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("does not ask for requirement confirmation by default", async () => {
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run(
+        [
+          "--requirement",
+          "Implement app module",
+          "--evidence",
+          "App module is implemented",
+          "--rules",
+          "--partial-ok",
+          "--workspace",
+          workspace,
+        ],
+        { provider: stubProvider, stdinIsTTY: true },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout).version).toBe("rules-v1");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("fails deterministically when confirmation is requested outside a TTY", async () => {
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run(
+        [
+          "--requirement",
+          "REQ-1: Implement app module",
+          "--evidence",
+          "CLAIM-1: App module is implemented",
+          "--rules",
+          "--confirm-requirements",
+          "--workspace",
+          workspace,
+        ],
+        { provider: stubProvider, stdinIsTTY: false },
+      );
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("Requirement confirmation requires an interactive TTY");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("prints confirmation details to stderr and continues only for y", async () => {
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run(
+        [
+          "--requirement",
+          "REQ-1: Implement app module",
+          "--evidence",
+          "CLAIM-1: App module is implemented",
+          "--rules",
+          "--confirm-requirements",
+          "--partial-ok",
+          "--workspace",
+          workspace,
+        ],
+        { provider: stubProvider, confirmInput: "y", stdinIsTTY: true },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain("Decomposed requirements");
+      expect(result.stderr).toContain("REQ-1: Implement app module");
+      expect(JSON.parse(result.stdout).version).toBe("rules-v1");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 2 when requirement confirmation is rejected", async () => {
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run(
+        [
+          "--requirement",
+          "REQ-1: Implement app module",
+          "--evidence",
+          "CLAIM-1: App module is implemented",
+          "--rules",
+          "--confirm-requirements",
+          "--workspace",
+          workspace,
+        ],
+        { provider: stubProvider, confirmInput: "n", stdinIsTTY: true },
+      );
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("Requirement decomposition rejected");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("emits an HTML document for --html", async () => {
     const workspace = createTempWorkspace();
     try {
@@ -207,6 +334,7 @@ interface RunConfig {
   readonly provider?: LLMProvider;
   readonly stdin?: string;
   readonly stdinIsTTY?: boolean;
+  readonly confirmInput?: string;
   readonly writeFile?: (path: string, content: string) => Promise<void>;
 }
 
@@ -221,6 +349,7 @@ async function run(argv: readonly string[], config: RunConfig = {}) {
       return "";
     },
     readStdin: async () => config.stdin ?? "",
+    readLine: async () => config.confirmInput ?? "",
     stderr: (chunk) => {
       stderr += chunk;
     },
@@ -256,7 +385,51 @@ const stubProvider: LLMProvider = {
   },
 };
 
+const findingProvider: LLMProvider = {
+  async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+    if (input.schemaName === "RequirementDecompositionOutput") {
+      return {
+        metadata: { model: "stub", provider: "stub", retries: 0 },
+        object: input.schema.parse({
+          claims: [{ id: "CLAIM-1", text: "App module is implemented" }],
+          requirements: [{ id: "REQ-1", text: "Implement app module" }],
+        }) as T,
+        usage: {},
+      };
+    }
+    if (input.schemaName === "FileSelectionModelOutput") {
+      return {
+        metadata: { model: "stub", provider: "stub", retries: 0 },
+        object: input.schema.parse({ candidateFiles: ["src/app.ts"], warnings: [] }) as T,
+        usage: {},
+      };
+    }
+    return {
+      metadata: { model: "stub", provider: "stub", retries: 0 },
+      object: input.schema.parse({
+        confidence: 0.9,
+        evidenceRefs: [
+          { filePath: "src/app.ts", lineStart: 1, lineEnd: 3, snippetSummary: "src/app.ts" },
+        ],
+        explanation: "stub suspicious finding",
+        judgementDraft: "suspicious",
+        matchedClaimId: "CLAIM-1",
+        matchedRequirementId: "REQ-1",
+        repairSuggestion: "replace fake implementation",
+      }) as T,
+      usage: {},
+    };
+  },
+};
+
 function buildStubObject(schemaName: string): unknown {
+  if (schemaName === "RequirementDecompositionOutput") {
+    return {
+      claims: [{ id: "CLAIM-1", text: "App module is implemented" }],
+      confidence: 0.9,
+      requirements: [{ id: "REQ-1", text: "Implement app module" }],
+    };
+  }
   if (schemaName === "FileSelectionModelOutput") {
     return {
       candidateFiles: ["src/app.ts"],

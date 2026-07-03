@@ -1,13 +1,10 @@
 import { type FormEvent, useState } from "react";
 
-interface TodoItem {
-  readonly id: string;
-  readonly text: string;
-}
-
 export function TodoList() {
   const [draft, setDraft] = useState("");
-  const [items, setItems] = useState<TodoItem[]>([{ id: "seed", text: "Review DoneCheck report" }]);
+  const [items, setItems] = useState<{ id: string; text: string }[]>([
+    { id: "seed", text: "Review DoneCheck report" },
+  ]);
 
   function handleAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,12 +22,7 @@ export function TodoList() {
     <section className="card">
       <h2>Todos</h2>
       <form onSubmit={handleAdd}>
-        <input
-          aria-label="New todo"
-          onChange={(event) => setDraft(event.currentTarget.value)}
-          placeholder="Add a todo"
-          value={draft}
-        />
+        <input onChange={(e) => setDraft(e.currentTarget.value)} value={draft} />
         <button type="submit">Add</button>
       </form>
       <ul>

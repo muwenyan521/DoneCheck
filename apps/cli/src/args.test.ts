@@ -10,6 +10,7 @@ describe("parseArgs", () => {
         html: false,
         json: false,
         partialOk: false,
+        confirmRequirements: false,
         requirement: { kind: "value", value: "Build CLI" },
         rules: false,
       },
@@ -33,6 +34,7 @@ describe("parseArgs", () => {
         html: false,
         json: true,
         partialOk: true,
+        confirmRequirements: false,
         requirement: { kind: "file", path: "requirement.md" },
         rules: false,
       },
@@ -47,6 +49,7 @@ describe("parseArgs", () => {
         html: false,
         json: false,
         partialOk: false,
+        confirmRequirements: false,
         requirement: { kind: "value", value: "Build CLI" },
         rules: false,
       },
@@ -112,6 +115,12 @@ describe("parseArgs", () => {
       const r = parseArgs(["--requirement", "x", "--rules", "--workspace", "/tmp/proj"]);
       expect(r.ok).toBe(true);
       if (r.ok) expect(r.value.workspace).toBe("/tmp/proj");
+    });
+
+    it("parses --confirm-requirements", () => {
+      const r = parseArgs(["--requirement", "x", "--rules", "--confirm-requirements"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.confirmRequirements).toBe(true);
     });
 
     it("rejects --json + --rules together", () => {

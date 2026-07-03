@@ -12,6 +12,17 @@ const FIXTURE_DIR = resolve(fileURLToPath(import.meta.url), "..", "__fixtures__"
 
 const stubProvider: LLMProvider = {
   async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+    if (input.schemaName === "RequirementDecompositionOutput") {
+      return {
+        object: {
+          claims: [{ id: "CLAIM-1", text: "Login form is implemented in src/login.ts." }],
+          confidence: 0.9,
+          requirements: [{ id: "REQ-1", text: "User can log in with email and password." }],
+        } as unknown as T,
+        metadata: { provider: "stub", model: "stub", retries: 0 },
+        usage: {},
+      };
+    }
     if (input.schemaName === "FileSelectionModelOutput") {
       return {
         object: {
@@ -59,6 +70,28 @@ describe("runDoneCheckPipelineNode", () => {
     expect(result.fakeImplementationSignals.some((s) => s.pattern === "alert-only")).toBe(true);
     expect(result.fakeImplementationSignals.some((s) => s.pattern === "not-implemented")).toBe(
       true,
+    );
+  });
+
+  it("accepts explicit multi-item requirements and claims", async () => {
+    const result = await runDoneCheckPipelineNode({
+      workspacePath: FIXTURE_DIR,
+      requirement: "raw requirement text",
+      claim: "raw claim text",
+      requirements: [
+        { id: "REQ-1", text: "User can log in with email and password." },
+        { id: "REQ-2", text: "User can export CSV." },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "Login form is implemented in src/login.ts." },
+        { id: "CLAIM-2", text: "CSV export is implemented." },
+      ],
+      provider: stubProvider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    expect(result.report.judgements.map((judgement) => judgement.id)).toEqual(
+      expect.arrayContaining(["requirement:REQ-1", "requirement:REQ-2"]),
     );
   });
 });

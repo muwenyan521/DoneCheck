@@ -102,6 +102,7 @@ describe("readInput", () => {
 function options(overrides: Partial<CliOptions> = {}): CliOptions {
   return {
     evidence: { kind: "value", value: "done" },
+    confirmRequirements: false,
     html: false,
     json: false,
     partialOk: false,

@@ -16,6 +16,7 @@ export type TextSource = ValueSource | FileSource;
 export type EvidenceSource = TextSource | StdinSource;
 
 export interface CliOptions {
+  readonly confirmRequirements: boolean;
   readonly evidence: EvidenceSource;
   readonly html: boolean;
   readonly json: boolean;
@@ -52,6 +53,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   let partialOk = false;
   let rules = false;
   let html = false;
+  let confirmRequirements = false;
   let output: string | undefined;
   let workspace: string | undefined;
 
@@ -116,6 +118,10 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         html = true;
         break;
       }
+      case "--confirm-requirements": {
+        confirmRequirements = true;
+        break;
+      }
       case "--output": {
         const value = readOptionValue(argv, index, option);
         if (!value.ok) return value;
@@ -158,6 +164,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     ok: true,
     value: {
       evidence: evidence ?? { kind: "stdin" },
+      confirmRequirements,
       html,
       json,
       partialOk,

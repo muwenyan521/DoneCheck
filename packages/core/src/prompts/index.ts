@@ -12,3 +12,10 @@ export {
   semanticJudgementDraftPromptContract,
   semanticJudgementSystemPromptTemplate,
 } from "./semantic-judgement.js";
+export {
+  REQUIREMENT_DECOMPOSITION_PROMPT_VERSION,
+  type BuildRequirementDecompositionPromptInput,
+  buildRequirementDecompositionPrompt,
+  requirementDecompositionPromptContract,
+  requirementDecompositionSystemPromptTemplate,
+} from "./requirement-decomposition.js";

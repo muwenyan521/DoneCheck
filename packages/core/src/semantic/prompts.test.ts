@@ -1,17 +1,41 @@
 import { describe, expect, it } from "vitest";
 import {
   FILE_SELECTION_PROMPT_VERSION,
+  REQUIREMENT_DECOMPOSITION_PROMPT_VERSION,
   buildFileSelectionPrompt,
+  buildRequirementDecompositionPrompt,
   fileSelectionModelOutputPromptContract,
+  requirementDecompositionPromptContract,
 } from "../prompts/index.js";
 import {
   SEMANTIC_JUDGEMENT_PROMPT_VERSION,
   buildSemanticJudgementPrompt,
   semanticJudgementDraftPromptContract,
 } from "../prompts/index.js";
+import { requirementDecompositionOutputSchema } from "./requirement-decomposition-schema.js";
 import { fileSelectionModelOutputSchema, semanticJudgementDraftSchema } from "./schema.js";
 
 describe("phase 3 prompts", () => {
+  it("builds versioned requirement decomposition prompts with schema-aligned fields", () => {
+    const prompt = buildRequirementDecompositionPrompt({
+      requirement: "REQ-1: Implement login.\nREQ-2: Implement todos.",
+      claim: "CLAIM-1: Login is implemented.\nCLAIM-2: Todos are implemented.",
+    });
+
+    expect(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION).toBe("requirement-decomposition-v1");
+    expect(prompt.system).toContain(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION);
+    expect(prompt.user).toContain("requirements");
+    expect(prompt.user).toContain("claims");
+    expect(prompt.user).toContain("assumptions");
+    expect(prompt.user).toContain("clarifyingQuestions");
+
+    const payload = JSON.parse(prompt.user) as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual(["claim", "outputContract", "requirement"]);
+    expect(requirementDecompositionOutputSchema.keyof().options.sort()).toEqual(
+      Object.keys(requirementDecompositionPromptContract).sort(),
+    );
+  });
+
   it("builds versioned file selection prompts with schema-aligned input fields", () => {
     const prompt = buildFileSelectionPrompt({
       claim: "I implemented auth persistence.",

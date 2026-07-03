@@ -36,6 +36,7 @@ export interface ProviderWithMetadata extends LLMProvider {
 
 export class OpenAIProvider implements ProviderWithMetadata {
   private readonly client: OpenAI;
+  private readonly baseURL: string | undefined;
   private readonly model: string;
   readonly metadata: LLMProviderMetadata;
 
@@ -48,6 +49,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
         ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
       });
     this.model = config.model;
+    this.baseURL = config.baseURL;
     this.metadata = { provider: "openai", model: this.model, retries: 0 };
   }
 
@@ -55,27 +57,160 @@ export class OpenAIProvider implements ProviderWithMetadata {
     input: GenerateObjectInput<T>,
   ): Promise<GenerateObjectResult<T>> {
     const responseFormat = zodResponseFormat(input.schema as z.ZodType<T>, input.schemaName);
-    const completion = await this.client.beta.chat.completions.parse({
+    const messages = [
+      { role: "system" as const, content: input.prompt.system },
+      { role: "user" as const, content: input.prompt.user },
+    ];
+    try {
+      const completion = await this.client.beta.chat.completions.parse({
+        model: this.model,
+        messages,
+        response_format: responseFormat,
+      });
+      const choice = completion.choices[0];
+      const parsed = choice?.message?.parsed;
+      if (parsed === undefined || parsed === null) {
+        throw new Error(`OpenAI returned no parsed object for schema ${input.schemaName}`);
+      }
+      const usage = buildUsage(completion.usage);
+      const metadata: LLMProviderMetadata = {
+        provider: "openai",
+        model: completion.model ?? this.model,
+        retries: 0,
+      };
+      return { metadata, object: parsed as T, usage };
+    } catch (error) {
+      if (!isUnsupportedResponseFormatError(error) && !isJsonParseError(error)) throw error;
+      const fallback = await this.client.chat.completions.create(
+        this.buildFallbackRequest(input, messages),
+      );
+      const { parsed } = await this.parseFallbackContent(
+        input,
+        fallback.choices[0]?.message?.content,
+        messages,
+      );
+      return {
+        metadata: {
+          provider: "openai",
+          model: fallback.model ?? this.model,
+          retries: 0,
+        },
+        object: parsed as T,
+        usage: buildUsage(fallback.usage),
+      };
+    }
+  }
+
+  private buildFallbackRequest<T>(
+    input: GenerateObjectInput<T>,
+    messages: readonly { readonly role: "system" | "user"; readonly content: string }[],
+    repairContent?: string,
+  ): never {
+    return {
       model: this.model,
       messages: [
-        { role: "system", content: input.prompt.system },
-        { role: "user", content: input.prompt.user },
+        ...messages,
+        {
+          role: "user",
+          content: repairContent ?? buildJsonOnlyInstruction(input),
+        },
       ],
-      response_format: responseFormat,
-    });
-    const choice = completion.choices[0];
-    const parsed = choice?.message?.parsed;
-    if (parsed === undefined || parsed === null) {
-      throw new Error(`OpenAI returned no parsed object for schema ${input.schemaName}`);
-    }
-    const usage = buildUsage(completion.usage);
-    const metadata: LLMProviderMetadata = {
-      provider: "openai",
-      model: completion.model ?? this.model,
-      retries: 0,
-    };
-    return { metadata, object: parsed as T, usage };
+      stream: false,
+      ...(isDeepSeekCompatibility(this.baseURL)
+        ? { reasoning_effort: "high", thinking: { type: "enabled" } }
+        : {}),
+    } as never;
   }
+
+  private async parseFallbackContent<T>(
+    input: GenerateObjectInput<T>,
+    content: unknown,
+    messages: readonly { readonly role: "system" | "user"; readonly content: string }[],
+  ): Promise<{ parsed: T }> {
+    const first = parseAndValidateFallbackContent(input, content);
+    if (first.ok) return { parsed: first.value };
+    const repair = await this.client.chat.completions.create(
+      this.buildFallbackRequest(
+        input,
+        messages,
+        buildRepairInstruction(input.schemaName, content, first.error),
+      ),
+    );
+    const second = parseAndValidateFallbackContent(input, repair.choices[0]?.message?.content);
+    if (second.ok) return { parsed: second.value };
+    throw new Error(second.error);
+  }
+}
+
+function isUnsupportedResponseFormatError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLocaleLowerCase();
+  return (
+    lower.includes("response_format") &&
+    (lower.includes("unavailable") || lower.includes("unsupported"))
+  );
+}
+
+function isJsonParseError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLocaleLowerCase();
+  return lower.includes("is not valid json") || lower.includes("unexpected token");
+}
+
+function isDeepSeekCompatibility(baseURL: string | undefined): boolean {
+  return baseURL?.includes("deepseek.com") ?? false;
+}
+
+function buildJsonOnlyInstruction<T>(input: GenerateObjectInput<T>): string {
+  const responseFormat = zodResponseFormat(input.schema as z.ZodType<T>, input.schemaName);
+  return [
+    `Return only one valid JSON object for schema ${input.schemaName}.`,
+    "Do not use Markdown.",
+    "Do not wrap the response in a code block.",
+    "All required fields in the schema must be present.",
+    "Field names must exactly match the schema.",
+    "If a value cannot be determined, provide a valid placeholder value of the correct type.",
+    "For repairSuggestion, provide a concrete string suggestion instead of omitting it.",
+    "For evidenceRefs, use only exact filePath, lineStart, and lineEnd ranges present in the provided evidence snippets.",
+    "JSON schema:",
+    JSON.stringify(responseFormat, null, 2),
+  ].join("\n");
+}
+
+function buildRepairInstruction(schemaName: string, content: unknown, error: string): string {
+  return [
+    `The previous response did not validate for schema ${schemaName}.`,
+    "Return only the corrected complete JSON object.",
+    "Do not use Markdown or code fences.",
+    "Previous response:",
+    typeof content === "string" ? content : String(content),
+    "Validation error:",
+    error,
+  ].join("\n");
+}
+
+function parseAndValidateFallbackContent<T>(
+  input: GenerateObjectInput<T>,
+  content: unknown,
+): { ok: true; value: T } | { ok: false; error: string } {
+  if (typeof content !== "string" || content.length === 0) {
+    return { ok: false, error: `OpenAI returned no JSON content for schema ${input.schemaName}` };
+  }
+  try {
+    return { ok: true, value: input.schema.parse(JSON.parse(extractJsonObject(content))) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function extractJsonObject(content: string): string {
+  const withoutThink = content.replace(/<think>[\s\S]*?<\/think>/giu, "").trim();
+  const fenced = withoutThink.match(/```(?:json)?\s*([\s\S]*?)\s*```/u)?.[1];
+  const candidate = fenced ?? withoutThink;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return candidate;
+  return candidate.slice(start, end + 1);
 }
 
 export interface CreateProviderOptions {
@@ -89,7 +224,7 @@ export function createProvider(options: CreateProviderOptions = {}): ProviderWit
   }
   const sink = options.stderr ?? ((s: string) => process.stderr.write(s));
   sink(
-    "Warning: OPENAI_API_KEY not set; using deterministic mock provider. Set OPENAI_API_KEY to use a real provider.\n",
+    "Warning: OPENAI_API_KEY is not set; using deterministic mock provider. Set OPENAI_API_KEY to use a real provider.\n",
   );
   return createDeterministicMockProvider();
 }
@@ -103,6 +238,21 @@ export function createDeterministicMockProvider(): ProviderWithMetadata {
   return {
     metadata,
     async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+      if (input.schemaName === "RequirementDecompositionOutput") {
+        const payload = parsePromptPayload(input.prompt.user);
+        return {
+          object: input.schema.parse({
+            assumptions: [],
+            clarifyingQuestions: [],
+            claims: parseMarkedItems(payload.claim, "CLAIM"),
+            confidence: 0.5,
+            requirements: parseMarkedItems(payload.requirement, "REQ"),
+            warnings: ["deterministic-mock"],
+          }),
+          metadata,
+          usage: {},
+        };
+      }
       if (input.schemaName === "FileSelectionModelOutput") {
         const payload = parsePromptPayload(input.prompt.user);
         return {
@@ -133,6 +283,31 @@ export function createDeterministicMockProvider(): ProviderWithMetadata {
       };
     },
   };
+}
+
+function parseMarkedItems(value: unknown, prefix: "CLAIM" | "REQ") {
+  if (typeof value !== "string" || value.trim().length === 0) return [];
+  const marker = new RegExp(`^\\s*(${prefix}-\\d+)\\s*[:：-]\\s*(.+)$`, "u");
+  const items: { id: string; text: string }[] = [];
+  for (const rawLine of value.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+    const match = line.match(marker);
+    if (match !== null) {
+      const id = match[1];
+      const text = match[2];
+      if (id !== undefined && text !== undefined) {
+        items.push({ id, text: text.trim() });
+      }
+    } else if (items.length > 0) {
+      const last = items[items.length - 1];
+      if (last !== undefined) {
+        items[items.length - 1] = { ...last, text: `${last.text} ${line}`.trim() };
+      }
+    }
+  }
+  if (items.length > 0) return items;
+  return [{ id: `${prefix}-1`, text: value.trim() }];
 }
 
 export function resolveOpenAIProviderConfig(

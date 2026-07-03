@@ -6,7 +6,7 @@ CLAIM-2: Todo creation and local persistence are implemented in `src/components/
 
 CLAIM-3: CSV export is implemented in `src/components/ExportButton.tsx`.
 
-CLAIM-4: Responsive layout is implemented in `src/styles.css`.
+CLAIM-4: I added responsive layout support in `src/styles.css`.
 
 CLAIM-5: I also added a billing upgrade panel in `src/components/BillingPanel.tsx`.
 

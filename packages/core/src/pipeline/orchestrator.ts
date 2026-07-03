@@ -10,6 +10,11 @@ import type { LLMProvider } from "../semantic/provider.js";
 import type { EvidenceSnippet, StaticSignal } from "../semantic/schema.js";
 import { draftSemanticJudgements } from "../semantic/semantic-judgement.js";
 import { scanFakeImplementationSignals, scanStaticSignals } from "../static-signals/scanner.js";
+import {
+  buildExtraScopeCandidates,
+  matchClaimsToRequirements,
+  targetSignals,
+} from "./item-matching.js";
 
 export interface PipelineFile {
   readonly relativePath: string;
@@ -22,6 +27,8 @@ export interface OrchestrateAnalysisInput {
   readonly files: readonly PipelineFile[];
   readonly provider: LLMProvider;
   readonly generatedAt: string;
+  readonly claims?: readonly import("../semantic/schema.js").SemanticClaim[];
+  readonly requirements?: readonly import("../semantic/schema.js").SemanticRequirement[];
   readonly topK?: number;
 }
 
@@ -56,9 +63,17 @@ export async function orchestrateAnalysis(
 
   const projectFiles = input.files.map((f) => f.relativePath);
 
+  const requirements = dedupById(input.requirements ?? [{ id: "REQ-1", text: input.requirement }]);
+  const claims = dedupById(
+    input.claims ?? (input.claim === undefined ? [] : [{ id: "CLAIM-1", text: input.claim }]),
+  );
+  const matches = matchClaimsToRequirements(requirements, claims);
+  const selectionRequirement = requirements.map((item) => `${item.id}: ${item.text}`).join("\n");
+  const selectionClaim = claims.map((item) => `${item.id}: ${item.text}`).join("\n");
+
   const selection = await selectCandidateFiles({
-    requirement: input.requirement,
-    ...(input.claim === undefined ? {} : { claim: input.claim }),
+    requirement: selectionRequirement,
+    ...(selectionClaim.length === 0 ? {} : { claim: selectionClaim }),
     projectFiles,
     provider: input.provider,
     staticSignals,
@@ -77,41 +92,46 @@ export async function orchestrateAnalysis(
         ? splitLines.length - 1
         : splitLines.length;
     if (lineCount < 1) continue;
-    const snippet = extractEvidenceSnippets({
+    const snippets = extractEvidenceSnippets({
       content,
       filePath: candidatePath,
-      refs: [
-        {
-          filePath: candidatePath,
-          lineStart: 1,
-          lineEnd: Math.min(lineCount, 40),
-          snippetSummary: candidatePath,
-        },
-      ],
+      refs: buildEvidenceRefs(candidatePath, lineCount),
     });
-    evidenceSnippets.push(...snippet);
+    evidenceSnippets.push(...snippets);
   }
 
-  const requirements = [{ id: "REQ-1", text: input.requirement }];
-  const claims = input.claim === undefined ? [] : [{ id: "CLAIM-1", text: input.claim }];
+  const drafts = (
+    await Promise.all(
+      requirements.map((requirement) => {
+        const match = matches.find((item) => item.requirement.id === requirement.id);
+        return draftSemanticJudgements({
+          requirements: [requirement],
+          ...(match === undefined ? {} : { claim: match.claim }),
+          candidateFiles: selection.candidateFiles.map((p) => ({
+            filePath: p,
+            recallSource: "llmSelected" as const,
+          })),
+          evidenceSnippets,
+          provider: input.provider,
+        });
+      }),
+    )
+  ).flat();
 
-  const drafts = await draftSemanticJudgements({
+  const targeted = targetSignals({
+    claims,
+    fakeImplementationSignals,
+    matches,
     requirements,
-    ...(claims.length === 0 ? {} : { claim: claims[0] }),
-    candidateFiles: selection.candidateFiles.map((p) => ({
-      filePath: p,
-      recallSource: "llmSelected" as const,
-    })),
-    evidenceSnippets,
-    provider: input.provider,
+    staticSignals: targetStaticSignals(staticSignals),
   });
 
   const report = buildJudgementReport({
-    requirements,
-    claims,
-    extraScopeCandidates: [],
-    fakeImplementationSignals,
-    staticSignals: targetStaticSignals(staticSignals),
+    requirements: [...requirements],
+    claims: [...claims],
+    extraScopeCandidates: buildExtraScopeCandidates({ claims, matches, requirements }),
+    fakeImplementationSignals: targeted.fakeImplementationSignals,
+    staticSignals: targeted.staticSignals,
     semanticDrafts: drafts,
     generatedAt: input.generatedAt,
   });
@@ -127,4 +147,37 @@ export async function orchestrateAnalysis(
 
 function targetStaticSignals(signals: readonly StaticSignal[]): TargetedStaticSignal[] {
   return signals.map((signal) => ({ ...signal }));
+}
+
+function buildEvidenceRefs(filePath: string, lineCount: number) {
+  const refs = [
+    {
+      filePath,
+      lineStart: 1,
+      lineEnd: Math.min(lineCount, 40),
+      snippetSummary: filePath,
+    },
+  ];
+  for (let start = 1; start <= lineCount; start += 1) {
+    for (let end = start; end <= Math.min(lineCount, start + 39); end += 1) {
+      refs.push({
+        filePath,
+        lineStart: start,
+        lineEnd: end,
+        snippetSummary: filePath,
+      });
+    }
+  }
+  return refs;
+}
+
+function dedupById<T extends { readonly id: string }>(items: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    result.push(item);
+  }
+  return result;
 }

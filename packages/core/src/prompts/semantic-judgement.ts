@@ -5,7 +5,7 @@ import type {
   SemanticRequirement,
 } from "../semantic/schema.js";
 
-export const SEMANTIC_JUDGEMENT_PROMPT_VERSION = "semantic-judgement-v2";
+export const SEMANTIC_JUDGEMENT_PROMPT_VERSION = "semantic-judgement-v3";
 
 export const semanticJudgementSystemPromptTemplate = [
   `DoneCheck phase 3 semantic judgement prompt ${SEMANTIC_JUDGEMENT_PROMPT_VERSION}.`,
@@ -28,6 +28,7 @@ export const semanticJudgementSystemPromptTemplate = [
   "",
   "## Evidence discipline",
   "- Evidence refs MUST point to provided snippets: filePath, lineStart, lineEnd must match a given snippet exactly. NEVER fabricate paths, line numbers, or code.",
+  "- Copy filePath character-for-character from the evidence snippets; do not 'correct', normalize, or relocate paths (e.g. do not invent a `components/` subdirectory or change casing). A ref whose filePath differs from any snippet by even one character will be rejected.",
   "- evidenceRefs must be non-empty for every judgement. For 'unsupported', reference the most-relevant snippet(s) examined and let snippetSummary explain why they fall short.",
   "- snippetSummary must describe what the referenced code actually does, quoting identifiers where useful — not what you wish it did.",
   "- Do not assume behavior of code outside the snippets (called functions, imported modules). If the verdict hinges on unseen code, that is at best 'partial', and the explanation must name the unseen dependency.",

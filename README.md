@@ -396,6 +396,16 @@ nix develop -c node apps/cli/dist/index.js --html \
 
 HTML 报告包含 DoneCheck 标题、状态统计、风险/亮点、判定卡片、证据、调试信息；当 `semanticDraft.repairSuggestion` 存在时，判定卡片会直接展示 `Repair suggestion` / `修复建议`。
 
+> Note: `--html` may return exit code `1` when the generated report contains findings
+> such as `suspicious-fake-implementation`, `unfulfilled`, or `extra-scope`.
+> This does not mean HTML generation failed. If the file passed to `--output`
+> exists and is non-empty, the HTML report was generated successfully.
+> The non-zero exit code reflects the report result, not a rendering error.
+
+> 提示：当生成的报告含有 `suspicious-fake-implementation`、`unfulfilled`、`extra-scope` 等结论时，
+> `--html` 可能返回 exit code `1`。这并不代表 HTML 生成失败。只要传给 `--output` 的文件存在且非空，
+> 就说明 HTML 报告已成功生成；非零 exit code 反映的是报告结论，而非渲染错误。
+
 ### `--confirm-requirements`
 
 CLI 默认会自动拆分 requirements 和 claims 并继续分析。追加 `--confirm-requirements` 后，CLI 会先打印拆分结果并要求用户确认：

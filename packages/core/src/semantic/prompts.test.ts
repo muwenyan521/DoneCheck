@@ -22,7 +22,7 @@ describe("phase 3 prompts", () => {
       claim: "CLAIM-1: Login is implemented.\nCLAIM-2: Todos are implemented.",
     });
 
-    expect(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION).toBe("requirement-decomposition-v1");
+    expect(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION).toBe("requirement-decomposition-v4");
     expect(prompt.system).toContain(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION);
     expect(prompt.user).toContain("requirements");
     expect(prompt.user).toContain("claims");
@@ -36,6 +36,62 @@ describe("phase 3 prompts", () => {
     );
   });
 
+  it("requirement decomposition prompt forbids object form for string[] fields", () => {
+    const prompt = buildRequirementDecompositionPrompt({
+      requirement: "REQ-1: Implement login.",
+      claim: "CLAIM-1: Login is implemented.",
+    });
+
+    expect(prompt.system).toMatch(/Do NOT return objects/i);
+    expect(prompt.system).toContain("clarifyingQuestions");
+    expect(prompt.system).toContain("assumptions");
+    expect(prompt.system).toContain("warnings");
+    expect(prompt.system).toMatch(/plain string/i);
+  });
+
+  it("requirement decomposition prompt contract marks string[] fields as plain strings", () => {
+    expect(requirementDecompositionPromptContract.assumptions).toMatch(/string\[\]/i);
+    expect(requirementDecompositionPromptContract.clarifyingQuestions).toMatch(/string\[\]/i);
+    expect(requirementDecompositionPromptContract.warnings).toMatch(/string\[\]/i);
+  });
+
+  it("requirementDecompositionOutputSchema rejects object[] for clarifyingQuestions, assumptions, and warnings", () => {
+    const validBase = {
+      requirements: [{ id: "REQ-1", text: "Implement login." }],
+      claims: [{ id: "CLAIM-1", text: "Login is implemented." }],
+    };
+
+    expect(() =>
+      requirementDecompositionOutputSchema.parse({
+        ...validBase,
+        clarifyingQuestions: [{ id: "REQ-1", question: "Should this persist?" }],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      requirementDecompositionOutputSchema.parse({
+        ...validBase,
+        assumptions: [{ id: "A-1", text: "Assumes browser storage." }],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      requirementDecompositionOutputSchema.parse({
+        ...validBase,
+        warnings: [{ id: "W-1", text: "Contradiction found." }],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      requirementDecompositionOutputSchema.parse({
+        ...validBase,
+        clarifyingQuestions: ["REQ-1: Should this persist after reload?"],
+        assumptions: ["Browser localStorage is available."],
+        warnings: [],
+      }),
+    ).not.toThrow();
+  });
+
   it("builds versioned file selection prompts with schema-aligned input fields", () => {
     const prompt = buildFileSelectionPrompt({
       claim: "I implemented auth persistence.",
@@ -47,7 +103,7 @@ describe("phase 3 prompts", () => {
       topK: 5,
     });
 
-    expect(FILE_SELECTION_PROMPT_VERSION).toBe("file-selection-v1");
+    expect(FILE_SELECTION_PROMPT_VERSION).toBe("file-selection-v2");
     expect(prompt.system).toContain(FILE_SELECTION_PROMPT_VERSION);
     expect(prompt.user).toContain("requirement");
     expect(prompt.user).toContain("claim");
@@ -87,7 +143,7 @@ describe("phase 3 prompts", () => {
       requirement: { id: "req-1", text: "Persist auth state." },
     });
 
-    expect(SEMANTIC_JUDGEMENT_PROMPT_VERSION).toBe("semantic-judgement-v1");
+    expect(SEMANTIC_JUDGEMENT_PROMPT_VERSION).toBe("semantic-judgement-v3");
     expect(prompt.system).toContain(SEMANTIC_JUDGEMENT_PROMPT_VERSION);
     expect(prompt.user).toContain("requirement");
     expect(prompt.user).toContain("claim");

@@ -1,7 +1,31 @@
-export const REQUIREMENT_DECOMPOSITION_PROMPT_VERSION = "requirement-decomposition-v2";
+export const REQUIREMENT_DECOMPOSITION_PROMPT_VERSION = "requirement-decomposition-v4";
 
 export const requirementDecompositionSystemPromptTemplate = [
   `DoneCheck requirement decomposition prompt ${REQUIREMENT_DECOMPOSITION_PROMPT_VERSION}.`,
+  "",
+  "## CRITICAL: array element shapes (read first)",
+  "The output has TWO kinds of arrays. Mixing them up is the most common error and will be REJECTED:",
+  "- `requirements` and `claims` are arrays of OBJECTS: `{ id: string, text: string }[]`.",
+  "- `assumptions`, `clarifyingQuestions`, and `warnings` are arrays of PLAIN STRINGS: `string[]`. Each element MUST be a single JSON string, NOT an object.",
+  "- Do NOT return objects such as `{ id, question }` for clarifyingQuestions, or `{ id, text }` for assumptions or warnings. Any object element in these three fields causes the whole response to be rejected.",
+  '- If you need to reference which item a question or assumption concerns, write the ID inside the string, e.g. `"REQ-2: Should todo persistence happen automatically or only after clicking Save?"`.',
+  "- Empty arrays must be `[]`, not omitted and not `{}`.",
+  "",
+  "Valid (string[] fields are plain strings):",
+  "```json",
+  "{",
+  '  "clarifyingQuestions": ["REQ-2: Should todos be restored after page reload?"],',
+  '  "assumptions": [],',
+  '  "warnings": ["CLAIM-5 appears to describe scope outside the listed requirements."]',
+  "}",
+  "```",
+  "",
+  "Invalid (REJECTED — clarifyingQuestions contains an object):",
+  "```json",
+  "{",
+  '  "clarifyingQuestions": [{ "id": "REQ-2", "question": "Should todos be restored?" }]',
+  "}",
+  "```",
   "",
   "## Role",
   "You are a requirements analyst. Your only task is to split raw user requirements and AI completion claims into atomic, independently verifiable items for downstream analysis.",
@@ -26,8 +50,8 @@ export const requirementDecompositionSystemPromptTemplate = [
   "- Non-functional constraints (performance, style, compatibility) are requirements too.",
   "",
   "## Ambiguity handling",
-  "- If an item is vague or underspecified, still emit it, and add a targeted entry to clarifyingQuestions.",
-  "- Put unstated-but-necessary premises you relied on into assumptions (one assumption per entry).",
+  "- If an item is vague or underspecified, still emit it, and add a targeted plain-string clarifyingQuestion.",
+  "- Put unstated-but-necessary premises you relied on into assumptions (one plain-string assumption per entry).",
   "- Use warnings for structural problems: contradictory items, duplicated IDs, claims with no corresponding requirement, empty input sections.",
   "",
   "## Confidence calibration",
@@ -41,16 +65,20 @@ export const requirementDecompositionSystemPromptTemplate = [
   "- Do NOT include any prose outside the structured output.",
   "- Return only structured data matching the schema: requirements, claims, assumptions, clarifyingQuestions, confidence, warnings.",
   "- If a section of the input is empty, return an empty array for it rather than omitting or fabricating content.",
+  "- Re-read the CRITICAL section at the top before emitting: assumptions/clarifyingQuestions/warnings are string[], NOT object[].",
 ].join("\n");
 
 export const requirementDecompositionPromptContract = {
-  assumptions: "string[] — unstated premises relied on during decomposition; empty array if none",
-  clarifyingQuestions: "string[] — targeted questions for vague items; empty array if none",
+  assumptions:
+    "STRING[] (plain strings only, NEVER objects) — unstated premises relied on during decomposition; empty array if none",
+  clarifyingQuestions:
+    "STRING[] (plain strings only, NEVER objects) — targeted questions for vague items; empty array if none",
   claims: "{ id: string; text: string }[] — atomic claimed-done items, IDs stable per the ID rules",
   confidence: "number between 0 and 1, optional — calibrated per the confidence rules",
   requirements:
     "{ id: string; text: string }[] — atomic requested items, IDs stable per the ID rules",
-  warnings: "string[] — structural issues found in the input; empty array if none",
+  warnings:
+    "STRING[] (plain strings only, NEVER objects) — structural issues found in the input; empty array if none",
 } as const;
 
 export interface BuildRequirementDecompositionPromptInput {

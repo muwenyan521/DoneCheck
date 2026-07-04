@@ -1,0 +1,42 @@
+appId: com.donecheck.desktop
+productName: DoneCheck Desktop
+executableName: donecheck-desktop
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+directories:
+  output: release
+files:
+  - from: .
+    to: .
+    filter:
+      - dist/**/*
+      - package.json
+  - from: ../../node_modules/.pnpm/better-sqlite3@12.11.1/node_modules/better-sqlite3
+    to: node_modules/better-sqlite3
+    filter:
+      - '**/*'
+  - from: ../../node_modules/.pnpm/bindings@1.5.0/node_modules/bindings
+    to: node_modules/bindings
+    filter:
+      - '**/*'
+  - from: ../../node_modules/.pnpm/file-uri-to-path@1.0.0/node_modules/file-uri-to-path
+    to: node_modules/file-uri-to-path
+    filter:
+      - '**/*'
+asarUnpack:
+  - "**/*.node"
+  - "node_modules/better-sqlite3/**/*"
+extraMetadata:
+  main: dist/electron.cjs
+linux:
+  icon: assets/icons
+  target:
+    - AppImage
+    - deb
+  category: Development
+win:
+  icon: assets/icons/icon.ico
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

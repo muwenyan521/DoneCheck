@@ -2,6 +2,12 @@
   "name": "@donecheck/desktop",
   "version": "0.0.0",
   "private": true,
+  "description": "DoneCheck Desktop app",
+  "homepage": "https://github.com/wangxianming/DoneCheck#readme",
+  "author": {
+    "name": "DoneCheck Contributors",
+    "email": "maintainers@example.invalid"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -19,8 +25,17 @@
     "test": "vitest run --testTimeout=10000",
     "test:mocked-smoke": "vitest run --testTimeout=10000 src/electron-smoke.test.ts",
     "typecheck": "tsc --noEmit",
+    "electron:rebuild": "electron-rebuild -f -w better-sqlite3",
     "electron:smoke": "electron --no-sandbox dist/smoke.cjs",
-    "electron:start": "electron --no-sandbox dist/electron.cjs"
+    "electron:start": "electron --no-sandbox dist/electron.cjs",
+    "rebuild:node": "pnpm rebuild better-sqlite3",
+    "dist:dir": "electron-builder --dir",
+    "dist:linux": "electron-builder --linux --x64",
+    "dist:win": "electron-builder --win --x64",
+    "package:dir": "node scripts/package-with-abi-restore.mjs dir",
+    "package:linux": "node scripts/package-with-abi-restore.mjs linux",
+    "package:win": "node scripts/package-with-abi-restore.mjs win",
+    "smoke:packaged": "node scripts/smoke-packaged.mjs"
   },
   "dependencies": {
     "@donecheck/core": "workspace:*",
@@ -34,10 +49,13 @@
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",
+    "@electron/rebuild": "catalog:",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "electron": "catalog:",
+    "electron-builder": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vite": "^5.4.21",

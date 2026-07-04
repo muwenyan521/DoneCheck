@@ -5,9 +5,11 @@ packages:
 allowBuilds:
   '@biomejs/biome': true
   better-sqlite3: true
+  electron-winstaller: true
   esbuild: true
 
 catalog:
+  "@electron/rebuild": "4.1.0"
   "@biomejs/biome": "1.9.4"
   "@commitlint/cli": "19.5.0"
   "@commitlint/config-conventional": "19.5.0"
@@ -15,7 +17,9 @@ catalog:
   "@types/node": "22.9.0"
   "@types/react": "18.3.12"
   "@types/react-dom": "18.3.1"
-  "better-sqlite3": "11.5.0"
+  "better-sqlite3": "12.11.1"
+  "electron": "43.0.0"
+  "electron-builder": "26.15.3"
   "husky": "9.1.6"
   "license-checker": "25.0.1"
   "lint-staged": "15.2.10"

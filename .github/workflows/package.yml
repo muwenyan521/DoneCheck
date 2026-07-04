@@ -1,0 +1,57 @@
+name: Package Desktop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux AppImage and deb
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install --frozen-lockfile
+
+      - name: Package Linux desktop
+        run: nix develop -c pnpm --filter @donecheck/desktop package:linux
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: donecheck-desktop-linux
+          path: apps/desktop/release/**/*
+
+  windows:
+    name: Windows NSIS
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Pin pnpm
+        run: corepack prepare pnpm@11.8.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Windows desktop
+        run: pnpm --filter @donecheck/desktop package:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: donecheck-desktop-windows
+          path: apps/desktop/release/**/*

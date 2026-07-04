@@ -239,6 +239,16 @@ describe("JudgementReportPage", () => {
     expect(en).not.toContain("DoneCheck 阶段 5 报告");
   });
 
+  it("renders semantic repair suggestions visibly in zh-CN and en judgement cards", () => {
+    const zh = html(genericTemplate, "zh-CN");
+    const en = html(genericTemplate, "en");
+
+    expect(zh).toContain("修复建议");
+    expect(zh).toContain("No repair needed.");
+    expect(en).toContain("Repair suggestion");
+    expect(en).toContain("No repair needed.");
+  });
+
   it("maps reasonCode to localized display copy instead of exposing raw keys", () => {
     const markup = html(genericTemplate, "en");
 

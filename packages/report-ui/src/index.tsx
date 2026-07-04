@@ -61,6 +61,7 @@ const messages = {
       generatedAt: "Generated at",
       kind: "Kind",
       rulesVersion: "Rules version",
+      repairSuggestion: "Repair suggestion",
       signals: "Signals",
       sourceId: "Source ID",
       staticSignals: "Static recall signals",
@@ -127,6 +128,7 @@ const messages = {
       generatedAt: "生成时间",
       kind: "类型",
       rulesVersion: "规则版本",
+      repairSuggestion: "修复建议",
       signals: "信号",
       sourceId: "来源 ID",
       staticSignals: "静态召回信号",
@@ -385,6 +387,12 @@ function JudgementCard({
             ? translate("report.empty", locale)
             : judgement.evidenceRefs.map(formatEvidenceRef).join("; ")}
         </dd>
+        {judgement.semanticDraft?.repairSuggestion ? (
+          <>
+            <dt>{translate("common.repairSuggestion", locale)}</dt>
+            <dd>{judgement.semanticDraft.repairSuggestion}</dd>
+          </>
+        ) : null}
       </dl>
     </article>
   );

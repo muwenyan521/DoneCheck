@@ -21,6 +21,7 @@ export interface OpenAIProviderOptions {
   readonly model?: string;
   readonly baseURL?: string;
   readonly client?: OpenAI;
+  readonly structuredOutputStrict?: boolean;
 }
 
 export interface ResolvedOpenAIProviderConfig {
@@ -28,6 +29,7 @@ export interface ResolvedOpenAIProviderConfig {
   readonly apiKeySource: "options.apiKey" | "OPENAI_API_KEY";
   readonly baseURL?: string;
   readonly model: string;
+  readonly structuredOutputStrict: boolean;
 }
 
 export interface ProviderWithMetadata extends LLMProvider {
@@ -38,6 +40,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
   private readonly client: OpenAI;
   private readonly baseURL: string | undefined;
   private readonly model: string;
+  private readonly structuredOutputStrict: boolean;
   readonly metadata: LLMProviderMetadata;
 
   constructor(options: OpenAIProviderOptions = {}) {
@@ -50,13 +53,18 @@ export class OpenAIProvider implements ProviderWithMetadata {
       });
     this.model = config.model;
     this.baseURL = config.baseURL;
+    this.structuredOutputStrict = config.structuredOutputStrict;
     this.metadata = { provider: "openai", model: this.model, retries: 0 };
   }
 
   async generateObject<T = unknown>(
     input: GenerateObjectInput<T>,
   ): Promise<GenerateObjectResult<T>> {
-    const responseFormat = zodResponseFormat(input.schema as z.ZodType<T>, input.schemaName);
+    const responseFormat = buildResponseFormat(
+      input.schema as z.ZodType<T>,
+      input.schemaName,
+      this.structuredOutputStrict,
+    );
     const messages = [
       { role: "system" as const, content: input.prompt.system },
       { role: "user" as const, content: input.prompt.user },
@@ -78,7 +86,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
         model: completion.model ?? this.model,
         retries: 0,
       };
-      return { metadata, object: parsed as T, usage };
+      return { metadata, object: input.schema.parse(parsed), usage };
     } catch (error) {
       if (!isUnsupportedResponseFormatError(error) && !isJsonParseError(error)) throw error;
       const fallback = await this.client.chat.completions.create(
@@ -159,6 +167,21 @@ function isJsonParseError(error: unknown): boolean {
 
 function isDeepSeekCompatibility(baseURL: string | undefined): boolean {
   return baseURL?.includes("deepseek.com") ?? false;
+}
+
+function buildResponseFormat<T>(
+  schema: z.ZodType<T>,
+  schemaName: string,
+  strict: boolean,
+): ReturnType<typeof zodResponseFormat> {
+  const responseFormat = zodResponseFormat(schema, schemaName);
+  return {
+    ...responseFormat,
+    json_schema: {
+      ...responseFormat.json_schema,
+      strict,
+    },
+  };
 }
 
 function buildJsonOnlyInstruction<T>(input: GenerateObjectInput<T>): string {
@@ -336,7 +359,20 @@ function resolveOptionalOpenAIProviderConfig(
         : "OPENAI_API_KEY",
     ...(baseURL === undefined ? {} : { baseURL }),
     model: firstNonEmpty(options.model, process.env.OPENAI_MODEL) ?? "gpt-4o-mini",
+    structuredOutputStrict: resolveStructuredOutputStrict(options.structuredOutputStrict),
   };
+}
+
+function resolveStructuredOutputStrict(value: boolean | undefined): boolean {
+  if (value !== undefined) return value;
+  const env = process.env.OPENAI_STRUCTURED_OUTPUT_STRICT;
+  if (env === undefined || env.length === 0) return true;
+  const normalized = env.toLocaleLowerCase();
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  throw new ProviderConfigError(
+    "OPENAI_STRUCTURED_OUTPUT_STRICT must be one of true, false, 1, 0, yes, or no.",
+  );
 }
 
 function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   OpenAIProvider,
   ProviderConfigError,
@@ -102,6 +102,207 @@ describe("OpenAIProvider", () => {
     expect(result.usage.inputTokens).toBe(10);
     expect(result.usage.outputTokens).toBe(5);
     expect(result.usage.totalTokens).toBe(15);
+  });
+
+  it("sends strict structured output by default", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let parseArgs: unknown;
+    const fakeClient = {
+      beta: {
+        chat: {
+          completions: {
+            parse: async (args: unknown) => {
+              parseArgs = args;
+              return {
+                choices: [{ message: { parsed: { ok: true } } }],
+                model: "gpt-4o-mini",
+              };
+            },
+          },
+        },
+      },
+    };
+    const provider = new OpenAIProvider({ client: fakeClient as never });
+    const z = await import("zod");
+
+    await provider.generateObject({
+      prompt: { system: "s", user: "u", version: "v1" },
+      schema: z.object({ ok: z.boolean() }),
+      schemaName: "Ok",
+    });
+
+    expect(parseArgs).toMatchObject({
+      response_format: { json_schema: { strict: true } },
+    });
+  });
+
+  it("sets response_format.json_schema.strict false from OPENAI_STRUCTURED_OUTPUT_STRICT=false", async () => {
+    const oldKey = process.env.OPENAI_API_KEY;
+    const oldStrict = process.env.OPENAI_STRUCTURED_OUTPUT_STRICT;
+    process.env.OPENAI_API_KEY = "sk-test";
+    process.env.OPENAI_STRUCTURED_OUTPUT_STRICT = "false";
+    let parseArgs: unknown;
+    try {
+      const fakeClient = {
+        beta: {
+          chat: {
+            completions: {
+              parse: async (args: unknown) => {
+                parseArgs = args;
+                return {
+                  choices: [{ message: { parsed: { ok: true } } }],
+                  model: "gpt-4o-mini",
+                };
+              },
+            },
+          },
+        },
+      };
+      const provider = new OpenAIProvider({ client: fakeClient as never });
+      const z = await import("zod");
+
+      await provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      });
+
+      expect(parseArgs).toMatchObject({
+        response_format: { json_schema: { strict: false } },
+      });
+    } finally {
+      restoreEnv("OPENAI_API_KEY", oldKey);
+      restoreEnv("OPENAI_STRUCTURED_OUTPUT_STRICT", oldStrict);
+    }
+  });
+
+  it("sets response_format.json_schema.strict true from OPENAI_STRUCTURED_OUTPUT_STRICT=true", async () => {
+    const oldKey = process.env.OPENAI_API_KEY;
+    const oldStrict = process.env.OPENAI_STRUCTURED_OUTPUT_STRICT;
+    process.env.OPENAI_API_KEY = "sk-test";
+    process.env.OPENAI_STRUCTURED_OUTPUT_STRICT = "true";
+    let parseArgs: unknown;
+    try {
+      const fakeClient = {
+        beta: {
+          chat: {
+            completions: {
+              parse: async (args: unknown) => {
+                parseArgs = args;
+                return {
+                  choices: [{ message: { parsed: { ok: true } } }],
+                  model: "gpt-4o-mini",
+                };
+              },
+            },
+          },
+        },
+      };
+      const provider = new OpenAIProvider({ client: fakeClient as never });
+      const z = await import("zod");
+
+      await provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      });
+
+      expect(parseArgs).toMatchObject({
+        response_format: { json_schema: { strict: true } },
+      });
+    } finally {
+      restoreEnv("OPENAI_API_KEY", oldKey);
+      restoreEnv("OPENAI_STRUCTURED_OUTPUT_STRICT", oldStrict);
+    }
+  });
+
+  it("prefers explicit structuredOutputStrict over environment config", async () => {
+    const oldKey = process.env.OPENAI_API_KEY;
+    const oldStrict = process.env.OPENAI_STRUCTURED_OUTPUT_STRICT;
+    process.env.OPENAI_API_KEY = "sk-test";
+    process.env.OPENAI_STRUCTURED_OUTPUT_STRICT = "true";
+    let parseArgs: unknown;
+    try {
+      const fakeClient = {
+        beta: {
+          chat: {
+            completions: {
+              parse: async (args: unknown) => {
+                parseArgs = args;
+                return {
+                  choices: [{ message: { parsed: { ok: true } } }],
+                  model: "gpt-4o-mini",
+                };
+              },
+            },
+          },
+        },
+      };
+      const provider = new OpenAIProvider({
+        client: fakeClient as never,
+        structuredOutputStrict: false,
+      });
+      const z = await import("zod");
+
+      await provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      });
+
+      expect(parseArgs).toMatchObject({
+        response_format: { json_schema: { strict: false } },
+      });
+    } finally {
+      restoreEnv("OPENAI_API_KEY", oldKey);
+      restoreEnv("OPENAI_STRUCTURED_OUTPUT_STRICT", oldStrict);
+    }
+  });
+
+  it("validates parsed structured output with the local Zod schema when strict is false", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    const fakeClient = {
+      beta: {
+        chat: {
+          completions: {
+            parse: async () => ({
+              choices: [{ message: { parsed: { ok: true } } }],
+              model: "gpt-4o-mini",
+            }),
+          },
+        },
+      },
+    };
+    const provider = new OpenAIProvider({
+      client: fakeClient as never,
+      structuredOutputStrict: false,
+    });
+    const z = await import("zod");
+    const schema = z.object({ ok: z.boolean() });
+    const parse = vi.spyOn(schema, "parse");
+
+    const result = await provider.generateObject({
+      prompt: { system: "s", user: "u", version: "v1" },
+      schema,
+      schemaName: "Ok",
+    });
+
+    expect(parse).toHaveBeenCalledWith({ ok: true });
+    expect(result.object).toEqual({ ok: true });
+  });
+
+  it("rejects invalid OPENAI_STRUCTURED_OUTPUT_STRICT values", () => {
+    const oldKey = process.env.OPENAI_API_KEY;
+    const oldStrict = process.env.OPENAI_STRUCTURED_OUTPUT_STRICT;
+    process.env.OPENAI_API_KEY = "sk-test";
+    process.env.OPENAI_STRUCTURED_OUTPUT_STRICT = "maybe";
+    try {
+      expect(() => resolveOpenAIProviderConfig()).toThrow(ProviderConfigError);
+      expect(() => resolveOpenAIProviderConfig()).toThrow("OPENAI_STRUCTURED_OUTPUT_STRICT");
+    } finally {
+      restoreEnv("OPENAI_API_KEY", oldKey);
+      restoreEnv("OPENAI_STRUCTURED_OUTPUT_STRICT", oldStrict);
+    }
   });
 
   it("falls back with schema-aware JSON instruction", async () => {
@@ -380,6 +581,7 @@ describe("OpenAIProvider", () => {
         apiKeySource: "OPENAI_API_KEY",
         baseURL: "https://example.test/v1",
         model: "gpt-test",
+        structuredOutputStrict: true,
       });
     } finally {
       restoreEnv("OPENAI_API_KEY", oldOpenAIKey);
@@ -403,6 +605,7 @@ describe("OpenAIProvider", () => {
         apiKeySource: "options.apiKey",
         baseURL: "https://explicit.test/v1",
         model: "explicit-model",
+        structuredOutputStrict: true,
       });
     } finally {
       restoreEnv("OPENAI_API_KEY", old);

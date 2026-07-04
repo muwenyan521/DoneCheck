@@ -297,8 +297,8 @@ scopeDrift.score = extraScopeCount / totalJudgements
 ### 启用真实 provider
 
 ```bash
-OPENAI_API_KEY=sk-... nix develop -c pnpm --filter @donecheck/cli build
-OPENAI_API_KEY=sk-... nix develop -c node apps/cli/dist/index.js \
+OPENAI_API_KEY="$OPENAI_API_KEY" nix develop -c pnpm --filter @donecheck/cli build
+OPENAI_API_KEY="$OPENAI_API_KEY" nix develop -c node apps/cli/dist/index.js \
   --requirement "Implement shared contracts and core analysis tests." \
   --evidence "The shared contracts, core analysis, and tests implement verified coverage." \
   --rules
@@ -314,6 +314,120 @@ OPENAI_API_KEY=sk-... nix develop -c node apps/cli/dist/index.js \
 - `OPENAI_API_KEY` 未设置或为空 → 向 `stderr` 写入警告，返回 `createDeterministicMockProvider()`。
 
 `OpenAIProvider` 构造时若缺少 API key 会抛 `ProviderConfigError`；`createProvider()` 不会抛错，只回退到 mock。
+
+## Demo 复现指南
+
+Stage 7.3 的 Demo 目标是交付可复现的 CLI、HTML 与 GUI 展示路径，不改变判定引擎、rules 语义、shared 契约或 evidence guard。截图已按赛事流程另行留档，本仓库不引用或伪造截图文件。
+
+### Demo fixture
+
+Demo 使用仓库内置 React fixture：
+
+- `fixtures/demo-react-app/workspace`：待检查的示例 workspace。
+- `fixtures/demo-react-app/inputs/requirements.md`：评审需求输入。
+- `fixtures/demo-react-app/inputs/claim.md`：实现声明输入。
+
+### 无 key mock Demo
+
+未设置 `OPENAI_API_KEY` 时，CLI 会回退到 deterministic mock provider，可用于离线验证完整结构化路径、文件输出和退出码：
+
+```bash
+nix develop -c bash -lc '
+  env -u OPENAI_API_KEY -u OPENAI_BASE_URL -u OPENAI_MODEL \
+    node apps/cli/dist/index.js --rules \
+      --workspace fixtures/demo-react-app/workspace \
+      --requirement-file fixtures/demo-react-app/inputs/requirements.md \
+      --evidence-file fixtures/demo-react-app/inputs/claim.md
+'
+```
+
+deterministic mock 只用于证明需求拆解、文件选择、rules JSON 输出和 HTML 渲染等结构化链路可运行，不代表真实 LLM 判断质量。
+
+### SKYAI 真实 provider Demo
+
+当前推荐初赛 Demo provider 是 SKYAI 的 OpenAI-compatible endpoint。真实 key 只在命令层映射到通用 `OPENAI_API_KEY`，不要写入仓库：
+
+```bash
+OPENAI_API_KEY="$SKYAI_API_KEY" \
+OPENAI_BASE_URL="https://us-ai2.twskyhope.top/v1" \
+OPENAI_MODEL="gpt-5.4" \
+nix develop -c node apps/cli/dist/index.js --rules \
+  --workspace fixtures/demo-react-app/workspace \
+  --requirement-file fixtures/demo-react-app/inputs/requirements.md \
+  --evidence-file fixtures/demo-react-app/inputs/claim.md
+```
+
+如果真实 provider 返回 `502 Upstream request failed`，可以在同一命令中追加：
+
+```bash
+OPENAI_STRUCTURED_OUTPUT_STRICT=false
+```
+
+该参数只影响 provider 端 OpenAI structured-output JSON schema 的 strict 模式，不关闭本地 Zod schema parse，不补字段，也不放宽 DoneCheck 业务校验。
+
+### `--rules` 输出与 exit code
+
+`--rules` 输出完整 rules JSON 报告，适合保存、复核和二次校验：
+
+```bash
+nix develop -c node apps/cli/dist/index.js --rules \
+  --workspace fixtures/demo-react-app/workspace \
+  --requirement-file fixtures/demo-react-app/inputs/requirements.md \
+  --evidence-file fixtures/demo-react-app/inputs/claim.md \
+  > /tmp/donecheck-demo-rules.json
+```
+
+成功生成报告时 exit code 为 0。该 exit code 表示工具执行是否成功，不代表报告 pass/fail；报告结论需要读取 JSON 中的 `summaryStats`、各项 `finalStatus`、coverage 和 `scopeDrift`。
+
+### `--html` 输出
+
+`--html` 生成静态 HTML 报告，可通过 `--output` 指定文件路径：
+
+```bash
+OPENAI_API_KEY="$SKYAI_API_KEY" \
+OPENAI_BASE_URL="https://us-ai2.twskyhope.top/v1" \
+OPENAI_MODEL="gpt-5.4" \
+nix develop -c node apps/cli/dist/index.js --html \
+  --workspace fixtures/demo-react-app/workspace \
+  --requirement-file fixtures/demo-react-app/inputs/requirements.md \
+  --evidence-file fixtures/demo-react-app/inputs/claim.md \
+  --output /tmp/donecheck-demo-report.html
+```
+
+HTML 报告包含 DoneCheck 标题、状态统计、风险/亮点、判定卡片、证据、调试信息；当 `semanticDraft.repairSuggestion` 存在时，判定卡片会直接展示 `Repair suggestion` / `修复建议`。
+
+### `--confirm-requirements`
+
+CLI 默认会自动拆分 requirements 和 claims 并继续分析。追加 `--confirm-requirements` 后，CLI 会先打印拆分结果并要求用户确认：
+
+```bash
+nix develop -c node apps/cli/dist/index.js --rules --confirm-requirements \
+  --workspace fixtures/demo-react-app/workspace \
+  --requirement-file fixtures/demo-react-app/inputs/requirements.md \
+  --evidence-file fixtures/demo-react-app/inputs/claim.md
+```
+
+该模式需要交互式 TTY；非 TTY 环境会 exit 2，避免 CI 或重定向场景卡住等待输入。
+
+### GUI 复现步骤
+
+GUI 复现使用 `apps/desktop` 当前 Electron shell 与 report-ui 展示链路：
+
+1. 打开 desktop 应用。
+2. 选择 `fixtures/demo-react-app/workspace` 作为 workspace。
+3. 将 `fixtures/demo-react-app/inputs/requirements.md` 内容粘贴到 requirements 输入区。
+4. 将 `fixtures/demo-react-app/inputs/claim.md` 内容粘贴到 claim/evidence 输入区。
+5. 点击分析，等待 report-ui 报告渲染。
+6. 导出 HTML 并打开复核。
+
+真实 Electron 打包不是 Stage 7.3 重点；本阶段关注 Demo 展示链路和可复现 CLI/HTML 输出，不引入 Electron 打包依赖。
+
+### 已知说明
+
+- SKYAI 是当前推荐初赛 Demo provider；MiniMax/DeepSeek 可继续作为 OpenAI-compatible 兼容探索，不建议作为初赛主 Demo。
+- Zod optional warning 是已知 provider compatibility 事项；本阶段通过 `OPENAI_STRUCTURED_OUTPUT_STRICT` 处理 provider strict 兼容，不修改业务 schema。
+- Evidence Guard v2 是后续独立 core 规格提案，本阶段不放宽 evidence guard。
+- 当前真实报告可能 `partial=0`，但 fixture 已覆盖 fulfilled、unfulfilled、insufficient-evidence、suspicious-fake-implementation、extra-scope 等多类状态。
 
 ## Electron Shell
 

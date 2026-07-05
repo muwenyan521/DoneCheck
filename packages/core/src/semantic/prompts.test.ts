@@ -22,7 +22,7 @@ describe("phase 3 prompts", () => {
       claim: "CLAIM-1: Login is implemented.\nCLAIM-2: Todos are implemented.",
     });
 
-    expect(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION).toBe("requirement-decomposition-v4");
+    expect(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION).toBe("requirement-decomposition-v5");
     expect(prompt.system).toContain(REQUIREMENT_DECOMPOSITION_PROMPT_VERSION);
     expect(prompt.user).toContain("requirements");
     expect(prompt.user).toContain("claims");
@@ -47,6 +47,23 @@ describe("phase 3 prompts", () => {
     expect(prompt.system).toContain("assumptions");
     expect(prompt.system).toContain("warnings");
     expect(prompt.system).toMatch(/plain string/i);
+  });
+
+  it("requirement decomposition prompt preserves explicit numbered item granularity", () => {
+    const prompt = buildRequirementDecompositionPrompt({
+      requirement:
+        "REQ-1: Create an auth session, persist it in localStorage, and show the signed-in user.\nREQ-2: Add todos and restore them after reload.",
+      claim:
+        "CLAIM-1: Auth session is created, persisted, and displayed.\nCLAIM-2: Todos are added and restored.",
+    });
+
+    expect(prompt.system).toMatch(/explicit numbered requirements/i);
+    expect(prompt.system).toMatch(/preserve each numbered item as one requirement by default/i);
+    expect(prompt.system).toMatch(
+      /Do NOT convert one numbered requirement into multiple sibling requirements/i,
+    );
+    expect(prompt.system).toMatch(/Over-splitting explicit numbered items is an error/i);
+    expect(prompt.system).toMatch(/Claims with explicit numbering follow the same rule/i);
   });
 
   it("requirement decomposition prompt contract marks string[] fields as plain strings", () => {

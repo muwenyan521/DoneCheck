@@ -408,4 +408,81 @@ describe("orchestrateAnalysis", () => {
     expect(csv?.finalStatus).toBe("suspicious-fake-implementation");
     expect(result.report.scopeDrift.extraScopeCount).toBeGreaterThan(0);
   });
+
+  it("keeps semantic judgement calls aligned with stabilized explicit requirements", async () => {
+    const semanticCalls: string[] = [];
+    const provider: LLMProvider = {
+      async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+        if (input.schemaName === "FileSelectionModelOutput") {
+          return {
+            object: input.schema.parse({ candidateFiles: ["src/app.ts"] }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        if (input.schemaName === "SemanticJudgementDraft") {
+          const payload = JSON.parse(input.prompt.user) as {
+            evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+            requirement: { id: string };
+          };
+          semanticCalls.push(payload.requirement.id);
+          const ref = payload.evidenceSnippets[0];
+          if (ref === undefined) throw new Error("missing evidence");
+          return {
+            object: input.schema.parse({
+              confidence: 0.9,
+              evidenceRefs: [
+                {
+                  filePath: ref.filePath,
+                  lineEnd: ref.lineEnd,
+                  lineStart: ref.lineStart,
+                  snippetSummary: "app evidence",
+                },
+              ],
+              explanation: "implemented",
+              judgementDraft: "fulfilled",
+              matchedRequirementId: payload.requirement.id,
+              repairSuggestion: "none",
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        throw new Error(`unexpected schema ${input.schemaName}`);
+      },
+    };
+
+    const result = await orchestrateAnalysis({
+      requirement: "raw requirements",
+      claim: "raw claims",
+      requirements: [
+        { id: "REQ-1", text: "Create an auth session, persist it, and show the signed-in user." },
+        { id: "REQ-2", text: "Add todos, persist them, and restore them." },
+        { id: "REQ-3", text: "Export todos as CSV and show a confirmation." },
+        { id: "REQ-4", text: "Display validation errors and keep input intact." },
+        { id: "REQ-5", text: "Keep loading UI responsive and accessible." },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "Auth is implemented." },
+        { id: "CLAIM-2", text: "Todos are implemented." },
+        { id: "CLAIM-3", text: "Export is implemented." },
+        { id: "CLAIM-4", text: "Validation is implemented." },
+        { id: "CLAIM-5", text: "Loading UI is implemented." },
+      ],
+      files: [
+        {
+          relativePath: "src/app.ts",
+          content: "export const app = () => localStorage.getItem('session');",
+        },
+      ],
+      provider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    expect(semanticCalls).toEqual(["REQ-1", "REQ-2", "REQ-3", "REQ-4", "REQ-5"]);
+    expect(semanticCalls.length).toBe(
+      result.report.judgements.filter((j) => j.id.startsWith("requirement:")).length,
+    );
+    expect(semanticCalls.length).toBeLessThan(10);
+  });
 });

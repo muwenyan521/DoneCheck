@@ -343,28 +343,6 @@ nix develop -c bash -lc '
 
 deterministic mock 只用于证明需求拆解、文件选择、rules JSON 输出和 HTML 渲染等结构化链路可运行，不代表真实 LLM 判断质量。
 
-### SKYAI 真实 provider Demo
-
-当前推荐初赛 Demo provider 是 SKYAI 的 OpenAI-compatible endpoint。真实 key 只在命令层映射到通用 `OPENAI_API_KEY`，不要写入仓库：
-
-```bash
-OPENAI_API_KEY="$SKYAI_API_KEY" \
-OPENAI_BASE_URL="https://us-ai2.twskyhope.top/v1" \
-OPENAI_MODEL="gpt-5.4" \
-nix develop -c node apps/cli/dist/index.js --rules \
-  --workspace fixtures/demo-react-app/workspace \
-  --requirement-file fixtures/demo-react-app/inputs/requirements.md \
-  --evidence-file fixtures/demo-react-app/inputs/claim.md
-```
-
-如果真实 provider 返回 `502 Upstream request failed`，可以在同一命令中追加：
-
-```bash
-OPENAI_STRUCTURED_OUTPUT_STRICT=false
-```
-
-该参数只影响 provider 端 OpenAI structured-output JSON schema 的 strict 模式，不关闭本地 Zod schema parse，不补字段，也不放宽 DoneCheck 业务校验。
-
 ### `--rules` 输出与 exit code
 
 `--rules` 输出完整 rules JSON 报告，适合保存、复核和二次校验：
@@ -384,9 +362,6 @@ nix develop -c node apps/cli/dist/index.js --rules \
 `--html` 生成静态 HTML 报告，可通过 `--output` 指定文件路径：
 
 ```bash
-OPENAI_API_KEY="$SKYAI_API_KEY" \
-OPENAI_BASE_URL="https://us-ai2.twskyhope.top/v1" \
-OPENAI_MODEL="gpt-5.4" \
 nix develop -c node apps/cli/dist/index.js --html \
   --workspace fixtures/demo-react-app/workspace \
   --requirement-file fixtures/demo-react-app/inputs/requirements.md \

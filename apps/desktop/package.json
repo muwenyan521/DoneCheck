@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",
+    "@electron/asar": "catalog:",
     "@electron/rebuild": "catalog:",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",

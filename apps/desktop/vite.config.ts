@@ -1,16 +1,19 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+const rootDir = import.meta.dirname;
+
 export default defineConfig({
+  base: "./",
   build: {
     emptyOutDir: true,
-    outDir: "dist/renderer",
+    outDir: resolve(rootDir, "dist/renderer"),
     rollupOptions: {
-      input: resolve(import.meta.dirname, "src/renderer/index.html"),
+      input: resolve(rootDir, "src/renderer/index.html"),
     },
   },
-  root: "src/renderer",
+  root: resolve(rootDir, "src/renderer"),
   test: {
-    root: import.meta.dirname,
+    root: rootDir,
   },
 });

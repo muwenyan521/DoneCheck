@@ -9,6 +9,7 @@ allowBuilds:
   esbuild: true
 
 catalog:
+  "@electron/asar": "3.4.1"
   "@electron/rebuild": "4.1.0"
   "@biomejs/biome": "1.9.4"
   "@commitlint/cli": "19.5.0"

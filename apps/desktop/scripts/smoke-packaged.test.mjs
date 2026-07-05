@@ -1,10 +1,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createPackage } from "@electron/asar";
 import { describe, expect, it } from "vitest";
 import { inspectPackagedArtifacts } from "./smoke-packaged.mjs";
 
-function createReleaseFixture() {
+function createReleaseFixture(
+  indexHtml = '<script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css">',
+) {
   const root = mkdtempSync(path.join(tmpdir(), "donecheck-packaged-"));
   const release = path.join(root, "release");
   const resources = path.join(release, "linux-unpacked", "resources", "app.asar.unpacked");
@@ -26,7 +29,37 @@ function createReleaseFixture() {
   );
   writeFileSync(
     path.join(release, "linux-unpacked", "resources", "app", "dist", "renderer", "index.html"),
-    "renderer",
+    indexHtml,
+  );
+  mkdirSync(
+    path.join(release, "linux-unpacked", "resources", "app", "dist", "renderer", "assets"),
+    { recursive: true },
+  );
+  writeFileSync(
+    path.join(
+      release,
+      "linux-unpacked",
+      "resources",
+      "app",
+      "dist",
+      "renderer",
+      "assets",
+      "app.js",
+    ),
+    "app",
+  );
+  writeFileSync(
+    path.join(
+      release,
+      "linux-unpacked",
+      "resources",
+      "app",
+      "dist",
+      "renderer",
+      "assets",
+      "app.css",
+    ),
+    "style",
   );
   writeFileSync(
     path.join(
@@ -39,6 +72,59 @@ function createReleaseFixture() {
     ),
     "native",
   );
+  return { root, release };
+}
+
+async function createAsarFixture({
+  includeRenderer = false,
+  includeAppImage = true,
+  indexHtml = '<script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css">',
+} = {}) {
+  const root = mkdtempSync(path.join(tmpdir(), "donecheck-asar-"));
+  const release = path.join(root, "release");
+  const unpacked = path.join(release, "linux-unpacked");
+  const resources = path.join(unpacked, "resources");
+  const appDir = path.join(root, "app");
+
+  mkdirSync(path.join(appDir, "dist"), { recursive: true });
+  writeFileSync(
+    path.join(appDir, "dist", "electron.cjs"),
+    'const path=require("path");win.loadFile(path.resolve(__dirname,"renderer","index.html"));',
+  );
+  writeFileSync(path.join(appDir, "dist", "preload.cjs"), "preload");
+  if (includeRenderer) {
+    mkdirSync(path.join(appDir, "dist", "renderer", "assets"), { recursive: true });
+    writeFileSync(path.join(appDir, "dist", "renderer", "index.html"), indexHtml);
+    writeFileSync(path.join(appDir, "dist", "renderer", "assets", "app.js"), "app");
+    writeFileSync(path.join(appDir, "dist", "renderer", "assets", "app.css"), "style");
+  }
+  writeFileSync(path.join(appDir, "package.json"), '{"name":"donecheck-desktop"}');
+
+  mkdirSync(resources, { recursive: true });
+  await createPackage(appDir, path.join(resources, "app.asar"));
+
+  mkdirSync(
+    path.join(resources, "app.asar.unpacked", "node_modules", "better-sqlite3", "build", "Release"),
+    { recursive: true },
+  );
+  writeFileSync(
+    path.join(
+      resources,
+      "app.asar.unpacked",
+      "node_modules",
+      "better-sqlite3",
+      "build",
+      "Release",
+      "better_sqlite3.node",
+    ),
+    "native",
+  );
+
+  if (includeAppImage) {
+    writeFileSync(path.join(release, "DoneCheck Desktop-0.0.0.AppImage"), "appimage");
+  }
+  writeFileSync(path.join(unpacked, "DoneCheck Desktop"), "binary");
+
   return { root, release };
 }
 
@@ -72,6 +158,94 @@ describe("smoke-packaged", () => {
           "PASS artifact structure smoke passed",
         ]),
       );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when asar has no renderer entry even though electron.cjs mentions index.html", async () => {
+    const fixture = await createAsarFixture({ includeRenderer: false });
+    try {
+      const result = inspectPackagedArtifacts(fixture.release);
+      expect(result.ok).toBe(false);
+      expect(result.lines.some((line) => line.startsWith("FAIL renderer found"))).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes when asar contains renderer entry", async () => {
+    const fixture = await createAsarFixture({ includeRenderer: true });
+    try {
+      const result = inspectPackagedArtifacts(fixture.release);
+      expect(result.ok).toBe(true);
+      expect(result.lines.some((line) => line.startsWith("PASS renderer found"))).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes dir-only package without AppImage when asar structure is correct", async () => {
+    const fixture = await createAsarFixture({ includeRenderer: true, includeAppImage: false });
+    try {
+      const result = inspectPackagedArtifacts(fixture.release);
+      expect(result.ok).toBe(true);
+      expect(result.lines.some((line) => line.startsWith("PASS renderer found"))).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when renderer asset paths are absolute", async () => {
+    const fixture = await createAsarFixture({
+      includeRenderer: true,
+      indexHtml:
+        '<script type="module" src="/assets/app.js"></script><link rel="stylesheet" href="/assets/app.css">',
+    });
+    try {
+      const result = inspectPackagedArtifacts(fixture.release);
+      expect(result.ok).toBe(false);
+      expect(
+        result.lines.some((line) => line.includes("FAIL renderer asset path is absolute")),
+      ).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes when renderer asset paths are relative", async () => {
+    const fixture = await createAsarFixture({
+      includeRenderer: true,
+      indexHtml:
+        '<script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css">',
+    });
+    try {
+      const result = inspectPackagedArtifacts(fixture.release);
+      expect(result.ok).toBe(true);
+      expect(result.lines).toEqual(
+        expect.arrayContaining([
+          "PASS renderer asset paths are relative",
+          "PASS artifact structure smoke passed",
+        ]),
+      );
+      expect(result.lines.some((line) => line.includes("FAIL renderer asset path"))).toBe(false);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when renderer entries exist but index html points at absolute assets", async () => {
+    const fixture = await createAsarFixture({
+      includeRenderer: true,
+      indexHtml: '<script type="module" src="/assets/app.js"></script>',
+    });
+    try {
+      const result = inspectPackagedArtifacts(fixture.release);
+      expect(result.ok).toBe(false);
+      expect(result.lines.some((line) => line.startsWith("PASS renderer found"))).toBe(true);
+      expect(
+        result.lines.some((line) => line.includes("FAIL renderer asset path is absolute")),
+      ).toBe(true);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }

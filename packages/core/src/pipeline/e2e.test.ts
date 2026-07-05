@@ -35,14 +35,19 @@ const stubProvider: LLMProvider = {
         usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
       };
     }
+    const payload = JSON.parse(input.prompt.user) as {
+      evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+    };
+    const ref = payload.evidenceSnippets.find((snippet) => snippet.filePath === "src/login.ts");
+    if (ref === undefined) throw new Error("missing selected login evidence");
     return {
       object: {
         confidence: 0.6,
         evidenceRefs: [
           {
-            filePath: "src/login.ts",
-            lineStart: 1,
-            lineEnd: 6,
+            filePath: ref.filePath,
+            lineStart: ref.lineStart,
+            lineEnd: ref.lineEnd,
             snippetSummary: "login with localStorage + alert + not implemented placeholder",
           },
         ],

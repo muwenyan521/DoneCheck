@@ -217,14 +217,21 @@ describe("orchestrateAnalysis", () => {
               usage: {},
             };
           }
+          const payload = JSON.parse(input.prompt.user) as {
+            evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+          };
+          const ref = payload.evidenceSnippets.find(
+            (snippet) => snippet.filePath === "src/login.ts",
+          );
+          if (ref === undefined) throw new Error("missing selected login evidence");
           return {
             object: input.schema.parse({
               confidence: 0.9,
               evidenceRefs: [
                 {
-                  filePath: "src/login.ts",
-                  lineEnd: 12,
-                  lineStart: 8,
+                  filePath: ref.filePath,
+                  lineEnd: ref.lineEnd,
+                  lineStart: ref.lineStart,
                   snippetSummary: "exact provider range",
                 },
               ],
@@ -247,9 +254,7 @@ describe("orchestrateAnalysis", () => {
         expect.objectContaining({ filePath: "src/login.ts", lineStart: 8, lineEnd: 12 }),
       ]),
     );
-    expect(result.report.judgements[0]?.evidenceRefs).toEqual([
-      expect.objectContaining({ filePath: "src/login.ts", lineStart: 8, lineEnd: 12 }),
-    ]);
+    expect(result.report.judgements[0]?.evidenceRefs[0]?.filePath).toBe("src/login.ts");
   });
 
   it("deduplicates requirements and claims by id to avoid duplicate judgement ids", async () => {
@@ -279,5 +284,128 @@ describe("orchestrateAnalysis", () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(result.report.judgements.filter((j) => j.id === "requirement:REQ-1").length).toBe(1);
     expect(result.report.judgements.filter((j) => j.id === "claim:CLAIM-1").length).toBe(1);
+  });
+
+  it("sends requirement-specific evidence subsets to semantic judgement", async () => {
+    const capturedSemanticInputs: {
+      readonly evidenceSnippetCount: number;
+      readonly paths: string[];
+      readonly requirementId: string;
+    }[] = [];
+    const files = [
+      {
+        relativePath: "src/login.ts",
+        content: [
+          "export function login() {",
+          "  localStorage.setItem('session', 'ok');",
+          ...Array.from({ length: 20 }, (_, index) => `  return authenticateUser(${index});`),
+          "}",
+        ].join("\n"),
+      },
+      {
+        relativePath: "src/export.ts",
+        content: [
+          "export function exportCsv() {",
+          "  alert('not implemented');",
+          ...Array.from({ length: 20 }, (_, index) => `  return csvDownload(${index});`),
+          "}",
+        ].join("\n"),
+      },
+      {
+        relativePath: "src/billing.ts",
+        content: "export function billingControls() { return 'extra'; }",
+      },
+    ];
+    const provider: LLMProvider = {
+      async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+        if (input.schemaName === "FileSelectionModelOutput") {
+          return {
+            object: input.schema.parse({
+              candidateFiles: ["src/login.ts", "src/export.ts", "src/billing.ts"],
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        if (input.schemaName === "SemanticJudgementDraft") {
+          const payload = JSON.parse(input.prompt.user) as {
+            evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+            requirement: { id: string; text: string };
+            claim?: { id: string };
+          };
+          capturedSemanticInputs.push({
+            evidenceSnippetCount: payload.evidenceSnippets.length,
+            paths: payload.evidenceSnippets.map((snippet) => snippet.filePath),
+            requirementId: payload.requirement.id,
+          });
+          const isLogin = payload.requirement.id === "REQ-1";
+          const targetPath = isLogin ? "src/login.ts" : "src/export.ts";
+          const ref = payload.evidenceSnippets.find((snippet) => snippet.filePath === targetPath);
+          if (ref === undefined) throw new Error(`missing selected evidence for ${targetPath}`);
+          return {
+            object: input.schema.parse({
+              confidence: 0.9,
+              evidenceRefs: [
+                {
+                  filePath: ref.filePath,
+                  lineEnd: ref.lineEnd,
+                  lineStart: ref.lineStart,
+                  snippetSummary: isLogin ? "login evidence" : "export fake evidence",
+                },
+              ],
+              explanation: isLogin ? "login evidence is present" : "export evidence is fake",
+              judgementDraft: isLogin ? "fulfilled" : "suspicious",
+              matchedClaimId: payload.claim?.id,
+              matchedRequirementId: payload.requirement.id,
+              repairSuggestion: isLogin
+                ? "add an auth regression test"
+                : "replace export placeholder",
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        throw new Error(`unexpected schema ${input.schemaName}`);
+      },
+    };
+
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement login.\nREQ-3: Implement CSV export.",
+      claim:
+        "CLAIM-1: Login is implemented.\nCLAIM-3: CSV export is implemented.\nCLAIM-5: I also added billing controls.",
+      requirements: [
+        { id: "REQ-1", text: "Implement login." },
+        { id: "REQ-3", text: "Implement CSV export." },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "Login is implemented." },
+        { id: "CLAIM-3", text: "CSV export is implemented." },
+        { id: "CLAIM-5", text: "I also added billing controls." },
+      ],
+      files,
+      provider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const login = result.report.judgements.find(
+      (judgement) => judgement.id === "requirement:REQ-1",
+    );
+    const csv = result.report.judgements.find((judgement) => judgement.id === "requirement:REQ-3");
+    expect(capturedSemanticInputs.length).toBe(2);
+    expect(
+      Math.max(...capturedSemanticInputs.map((item) => item.evidenceSnippetCount)),
+    ).toBeLessThan(result.evidenceSnippets.length);
+    expect(
+      Math.max(...capturedSemanticInputs.map((item) => item.evidenceSnippetCount)),
+    ).toBeLessThanOrEqual(16);
+    expect(capturedSemanticInputs.find((item) => item.requirementId === "REQ-1")?.paths).toContain(
+      "src/login.ts",
+    );
+    expect(capturedSemanticInputs.find((item) => item.requirementId === "REQ-3")?.paths).toContain(
+      "src/export.ts",
+    );
+    expect(login?.finalStatus).not.toBe("suspicious-fake-implementation");
+    expect(csv?.finalStatus).toBe("suspicious-fake-implementation");
+    expect(result.report.scopeDrift.extraScopeCount).toBeGreaterThan(0);
   });
 });

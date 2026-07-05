@@ -10,6 +10,7 @@ import type { LLMProvider } from "../semantic/provider.js";
 import type { EvidenceSnippet, StaticSignal } from "../semantic/schema.js";
 import { draftSemanticJudgements } from "../semantic/semantic-judgement.js";
 import { scanFakeImplementationSignals, scanStaticSignals } from "../static-signals/scanner.js";
+import { selectEvidenceForRequirement } from "./evidence-selection.js";
 import {
   buildExtraScopeCandidates,
   matchClaimsToRequirements,
@@ -100,6 +101,14 @@ export async function orchestrateAnalysis(
     evidenceSnippets.push(...snippets);
   }
 
+  const targeted = targetSignals({
+    claims,
+    fakeImplementationSignals,
+    matches,
+    requirements,
+    staticSignals: targetStaticSignals(staticSignals),
+  });
+
   const drafts = (
     await Promise.all(
       requirements.map((requirement) => {
@@ -111,20 +120,19 @@ export async function orchestrateAnalysis(
             filePath: p,
             recallSource: "llmSelected" as const,
           })),
-          evidenceSnippets,
+          evidenceSnippets: selectEvidenceForRequirement({
+            candidateFiles: selection.candidateFiles,
+            ...(match === undefined ? {} : { claim: match.claim, match }),
+            evidenceSnippets,
+            fakeImplementationSignals: targeted.fakeImplementationSignals,
+            requirement,
+            staticSignals: targeted.staticSignals,
+          }),
           provider: input.provider,
         });
       }),
     )
   ).flat();
-
-  const targeted = targetSignals({
-    claims,
-    fakeImplementationSignals,
-    matches,
-    requirements,
-    staticSignals: targetStaticSignals(staticSignals),
-  });
 
   const report = buildJudgementReport({
     requirements: [...requirements],

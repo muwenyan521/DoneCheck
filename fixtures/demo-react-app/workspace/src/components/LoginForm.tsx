@@ -8,9 +8,13 @@ export function LoginForm() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = createAuthSession({ email, password });
-    localStorage.setItem("donecheck:auth-session", JSON.stringify(session));
-    setMessage(`Signed in as ${session.email}`);
+    try {
+      const session = createAuthSession({ email, password });
+      localStorage.setItem("donecheck:auth-session", JSON.stringify(session));
+      setMessage(`Signed in as ${session.email}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to sign in");
+    }
   }
 
   return (

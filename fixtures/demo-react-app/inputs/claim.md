@@ -1,8 +1,8 @@
 # AI Completion Claim
 
-CLAIM-1: Email/password login is fully implemented in `src/components/LoginForm.tsx` and `src/lib/auth.ts`.
+CLAIM-1: Email/password login is implemented in `src/components/LoginForm.tsx` and `src/lib/auth.ts`, including submitted-field validation, auth session creation, localStorage session storage, and a signed-in email message.
 
-CLAIM-2: Todo creation and local persistence are implemented in `src/components/TodoList.tsx`.
+CLAIM-2: Todo creation and a local save action are implemented in `src/components/TodoList.tsx`.
 
 CLAIM-3: CSV export is implemented in `src/components/ExportButton.tsx`.
 

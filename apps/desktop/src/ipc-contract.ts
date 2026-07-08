@@ -1,12 +1,17 @@
 import type { JudgementReport } from "@donecheck/core";
 import type { ReportTemplateId } from "@donecheck/shared";
+import type { CredentialStatus } from "./desktop-provider.js";
+import type { DesktopSettings, DesktopSettingsPatch } from "./settings-store.js";
 
 export type { JudgementReport } from "@donecheck/core";
 export type { ReportTemplateId } from "@donecheck/shared";
+export type { CredentialStatus } from "./desktop-provider.js";
+export type { DesktopSettings, DesktopSettingsPatch } from "./settings-store.js";
 
 export type Locale = "en" | "zh-CN";
 
 export const DESKTOP_API_KEYS = [
+  "donecheck:decompose",
   "donecheck:analyze",
   "donecheck:render-html",
   "donecheck:select-workspace",
@@ -15,6 +20,12 @@ export const DESKTOP_API_KEYS = [
   "donecheck:history:get",
   "donecheck:history:save",
   "donecheck:history:delete",
+  "donecheck:settings:get",
+  "donecheck:settings:set",
+  "donecheck:settings:reset",
+  "donecheck:credentials:set-session-api-key",
+  "donecheck:credentials:clear-session-api-key",
+  "donecheck:credentials:status",
 ] as const;
 
 export type DesktopApiChannel = (typeof DESKTOP_API_KEYS)[number];
@@ -28,10 +39,32 @@ export type DesktopIpcResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly error: DesktopIpcError };
 
+export interface DecomposeItem {
+  readonly id: string;
+  readonly text: string;
+}
+
+export interface DecomposeRequest {
+  readonly workspaceDir: string;
+  readonly requirement: string;
+  readonly claim?: string;
+}
+
+export interface DecomposeResponse {
+  readonly assumptions: readonly string[];
+  readonly claims: readonly DecomposeItem[];
+  readonly clarifyingQuestions: readonly string[];
+  readonly requirements: readonly DecomposeItem[];
+  readonly warnings: readonly string[];
+  readonly confidence?: number | undefined;
+}
+
 export interface AnalyzeRequest {
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
+  readonly requirements?: readonly DecomposeItem[];
+  readonly claims?: readonly DecomposeItem[];
   readonly options?: {
     readonly generatedAt?: string;
     readonly topK?: number;
@@ -94,10 +127,39 @@ export interface DesktopHistoryApi {
   delete(request: HistoryDeleteRequest): Promise<DesktopIpcResult<{ readonly deleted: boolean }>>;
 }
 
+export interface SettingsSetRequest {
+  readonly patch: DesktopSettingsPatch;
+}
+
+export interface CredentialSetSessionApiKeyRequest {
+  readonly apiKey: string;
+}
+
+export interface CredentialStatusResponse {
+  readonly credentialStatus: CredentialStatus;
+}
+
+export interface DesktopSettingsApi {
+  get(): Promise<DesktopIpcResult<DesktopSettings>>;
+  set(request: SettingsSetRequest): Promise<DesktopIpcResult<DesktopSettings>>;
+  reset(): Promise<DesktopIpcResult<DesktopSettings>>;
+}
+
+export interface DesktopCredentialsApi {
+  setSessionApiKey(
+    request: CredentialSetSessionApiKeyRequest,
+  ): Promise<DesktopIpcResult<CredentialStatusResponse>>;
+  clearSessionApiKey(): Promise<DesktopIpcResult<CredentialStatusResponse>>;
+  status(): Promise<DesktopIpcResult<CredentialStatusResponse>>;
+}
+
 export interface DesktopApi {
+  decompose(request: DecomposeRequest): Promise<DesktopIpcResult<DecomposeResponse>>;
   analyze(request: AnalyzeRequest): Promise<DesktopIpcResult<JudgementReport>>;
   renderHtml(request: RenderHtmlRequest): Promise<DesktopIpcResult<RenderHtmlResponse>>;
   selectWorkspace(): Promise<DesktopIpcResult<SelectWorkspaceResponse>>;
   exportHtml(request: ExportHtmlRequest): Promise<DesktopIpcResult<ExportHtmlResponse>>;
   readonly history: DesktopHistoryApi;
+  readonly settings: DesktopSettingsApi;
+  readonly credentials: DesktopCredentialsApi;
 }

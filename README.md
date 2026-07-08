@@ -409,7 +409,7 @@ GUI 复现使用 `apps/desktop` 当前 Electron shell 与 report-ui 展示链路
 
 ### 已知说明
 
-- SKYAI 是当前推荐初赛 Demo provider；MiniMax/DeepSeek 可继续作为 OpenAI-compatible 兼容探索，不建议作为初赛主 Demo。
+- 任何 OpenAI-compatible provider 均可作为初赛 Demo provider；通过 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 配置即可切换，不建议依赖单一 provider 品牌。
 - Zod optional warning 是已知 provider compatibility 事项；本阶段通过 `OPENAI_STRUCTURED_OUTPUT_STRICT` 处理 provider strict 兼容，不修改业务 schema。
 - Evidence Guard v2 是后续独立 core 规格提案，本阶段不放宽 evidence guard。
 - 当前真实报告可能 `partial=0`，但 fixture 已覆盖 fulfilled、unfulfilled、insufficient-evidence、suspicious-fake-implementation、extra-scope 等多类状态。

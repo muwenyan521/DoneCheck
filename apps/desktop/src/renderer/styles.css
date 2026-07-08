@@ -165,6 +165,92 @@ label {
   color: #1e40af;
 }
 
+.settings-panel,
+.provider-error {
+  border: 1px solid #d8e2ed;
+  border-radius: 18px;
+  background: #f8fafc;
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.settings-header,
+.provider-error-header {
+  align-items: start;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr auto;
+}
+
+.settings-header h2,
+.settings-header p,
+.provider-error-header p {
+  margin: 0;
+}
+
+fieldset {
+  border: 1px solid #d8e2ed;
+  border-radius: 16px;
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.9rem;
+}
+
+legend {
+  color: #1f6feb;
+  font-weight: 800;
+  padding: 0 0.35rem;
+}
+
+.settings-help {
+  color: #526171;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.checkbox-row {
+  align-items: center;
+  display: flex;
+  gap: 0.55rem;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.provider-error {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
+}
+
+.provider-error ul {
+  display: grid;
+  gap: 0.5rem;
+  list-style: disc;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.provider-error li {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.provider-error pre {
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.hide-debug details {
+  display: none;
+}
+
 .empty-state {
   align-items: center;
   border: 1px dashed #9aa8bb;
@@ -308,6 +394,8 @@ label {
   .actions,
   .switch-row,
   .workspace-row,
+  .settings-header,
+  .provider-error-header,
   .history-list li {
     grid-template-columns: 1fr;
   }

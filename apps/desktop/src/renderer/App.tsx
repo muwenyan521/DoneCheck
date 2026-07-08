@@ -1,7 +1,19 @@
 import { reportTemplates } from "@donecheck/templates";
-import { useMemo, useState } from "react";
-import type { HistorySummary, JudgementReport, Locale, ReportTemplateId } from "../ipc-contract.js";
+import { useEffect, useMemo, useState } from "react";
+import type {
+  CredentialStatus,
+  DecomposeResponse,
+  HistorySummary,
+  JudgementReport,
+  Locale,
+  ReportTemplateId,
+} from "../ipc-contract.js";
+import { classifyProviderError } from "../provider-error-ux.js";
+import { type DesktopSettingsPatch, defaultDesktopSettings } from "../settings-model.js";
+import { DecompositionReviewPanel } from "./DecompositionReviewPanel.js";
 import { ReportPreview } from "./ReportPreview.js";
+import { ProviderErrorNotice, SettingsPanel } from "./SettingsPanel.js";
+import { proceedAnalyze, startAnalyzeFlow } from "./analyze-flow.js";
 
 type RunState = "idle" | "running" | "ready" | "error";
 
@@ -15,14 +27,24 @@ export function App() {
   const [workspaceDir, setWorkspaceDir] = useState("");
   const [requirement, setRequirement] = useState("");
   const [claim, setClaim] = useState("");
-  const [locale, setLocale] = useState<Locale>("zh-CN");
-  const [templateId, setTemplateId] = useState<ReportTemplateId>("generic");
+  const [settings, setSettings] = useState(defaultDesktopSettings);
+  const [credentialStatus, setCredentialStatus] = useState<CredentialStatus>("none");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [report, setReport] = useState<JudgementReport | undefined>();
+  const [pendingDecomposition, setPendingDecomposition] = useState<DecomposeResponse | undefined>();
   const [history, setHistory] = useState<readonly HistorySummary[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | undefined>();
   const [html, setHtml] = useState("");
   const [status, setStatus] = useState<RunState>("idle");
   const [message, setMessage] = useState("选择 workspace 并填写需求后开始分析。");
+  const [providerError, setProviderError] = useState<
+    ReturnType<typeof classifyProviderError> | undefined
+  >();
+
+  useEffect(() => {
+    void loadSettings();
+    void loadCredentialStatus();
+  }, []);
 
   const canAnalyze = useMemo(
     () => workspaceDir.trim().length > 0 && requirement.trim().length > 0 && status !== "running",
@@ -33,6 +55,7 @@ export function App() {
     const result = await desktopWindow.donecheck?.selectWorkspace();
     if (result?.ok && result.data.workspaceDir !== undefined) {
       setWorkspaceDir(result.data.workspaceDir);
+      await updateRecentWorkspaces(result.data.workspaceDir);
       setMessage(`已选择 workspace：${result.data.workspaceDir}`);
     } else if (result && !result.ok) {
       setStatus("error");
@@ -41,20 +64,88 @@ export function App() {
   }
 
   async function analyze() {
-    setStatus("running");
-    setMessage("正在调用 DoneCheck pipeline...");
-    const result = await desktopWindow.donecheck?.analyze({
-      workspaceDir,
-      requirement,
-      ...(claim.trim().length === 0 ? {} : { claim }),
-    });
-    if (!result?.ok) {
+    const api = desktopWindow.donecheck;
+    if (api === undefined) {
       setStatus("error");
-      setMessage(result?.error.message ?? "preload API unavailable");
+      setMessage("preload API unavailable");
+      setProviderError(classifyProviderError("preload API unavailable"));
       return;
     }
-    setReport(result.data);
-    await renderHtml(result.data, locale, templateId);
+    setStatus("running");
+    setProviderError(undefined);
+    setPendingDecomposition(undefined);
+    setMessage("正在拆分需求与声明...");
+    const claimValue = claim.trim().length === 0 ? undefined : claim;
+    const result = await startAnalyzeFlow({
+      api,
+      workspaceDir,
+      requirement,
+      ...(claimValue === undefined ? {} : { claim: claimValue }),
+      confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
+      settings: { ignore: settings.ignore, topK: settings.topK },
+    });
+    if (result.kind === "review") {
+      setPendingDecomposition(result.decomposition);
+      setStatus("idle");
+      setMessage("已拆分需求与声明，请确认后继续分析。");
+      return;
+    }
+    if (result.kind === "error") {
+      setStatus("error");
+      setMessage(result.error);
+      setProviderError(classifyProviderError(result.error));
+      return;
+    }
+    await finalizeReport(result.report);
+  }
+
+  async function confirmDecomposition() {
+    const api = desktopWindow.donecheck;
+    if (api === undefined || pendingDecomposition === undefined) return;
+    const decomposition = pendingDecomposition;
+    setStatus("running");
+    setProviderError(undefined);
+    setMessage("正在调用 DoneCheck pipeline...");
+    const claimValue = claim.trim().length === 0 ? undefined : claim;
+    const result = await proceedAnalyze(
+      {
+        api,
+        workspaceDir,
+        requirement,
+        ...(claimValue === undefined ? {} : { claim: claimValue }),
+        confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
+        settings: { ignore: settings.ignore, topK: settings.topK },
+      },
+      decomposition,
+    );
+    if (result.kind === "error") {
+      setStatus("error");
+      setMessage(result.error);
+      setProviderError(classifyProviderError(result.error));
+      return;
+    }
+    await finalizeReport(result.report);
+  }
+
+  function cancelDecomposition() {
+    setPendingDecomposition(undefined);
+    setStatus("idle");
+    setMessage("已取消分析，未生成报告。");
+  }
+
+  async function finalizeReport(nextReport: JudgementReport) {
+    setPendingDecomposition(undefined);
+    setReport(nextReport);
+    await renderHtml(nextReport, settings.locale, settings.templateId);
+    await updateRecentWorkspaces(workspaceDir);
+    if (settings.autoSaveHistory) {
+      await desktopWindow.donecheck?.history.save({
+        report: nextReport,
+        requirement,
+        workspaceDir,
+      });
+      await loadHistory();
+    }
     setStatus("ready");
     setMessage("分析完成，可预览或导出 HTML。");
   }
@@ -101,7 +192,7 @@ export function App() {
     setWorkspaceDir(result.data.workspaceDir);
     setSelectedHistoryId(result.data.id);
     setReport(result.data.report);
-    await renderHtml(result.data.report, locale, templateId);
+    await renderHtml(result.data.report, settings.locale, settings.templateId);
     setStatus("ready");
     setMessage(`已载入历史：${result.data.requirementSummary}`);
   }
@@ -131,14 +222,68 @@ export function App() {
     if (result?.ok) setHtml(result.data.html);
   }
 
-  async function changeLocale(nextLocale: Locale) {
-    setLocale(nextLocale);
-    if (report !== undefined) await renderHtml(report, nextLocale, templateId);
+  async function loadSettings() {
+    const result = await desktopWindow.donecheck?.settings.get();
+    if (result?.ok) {
+      setSettings(result.data);
+      if (result.data.reopenLastWorkspace && result.data.defaultWorkspaceDir !== null) {
+        setWorkspaceDir(result.data.defaultWorkspaceDir);
+      }
+    } else if (result && !result.ok) {
+      setStatus("error");
+      setMessage(result.error.message);
+    }
   }
 
-  async function changeTemplate(nextTemplate: ReportTemplateId) {
-    setTemplateId(nextTemplate);
-    if (report !== undefined) await renderHtml(report, locale, nextTemplate);
+  async function loadCredentialStatus() {
+    const result = await desktopWindow.donecheck?.credentials.status();
+    if (result?.ok) setCredentialStatus(result.data.credentialStatus);
+  }
+
+  async function updateSettings(patch: DesktopSettingsPatch) {
+    const result = await desktopWindow.donecheck?.settings.set({ patch });
+    if (!result?.ok) {
+      setStatus("error");
+      setMessage(result?.error.message ?? "preload API unavailable");
+      return;
+    }
+    const previous = settings;
+    setSettings(result.data);
+    if (
+      report !== undefined &&
+      (previous.locale !== result.data.locale || previous.templateId !== result.data.templateId)
+    ) {
+      await renderHtml(report, result.data.locale, result.data.templateId);
+    }
+    setMessage("设置已保存。Provider、topK、ignore 与 strict 会在下一次 Analyze 生效。");
+  }
+
+  async function resetSettings() {
+    const result = await desktopWindow.donecheck?.settings.reset();
+    if (result?.ok) {
+      setSettings(result.data);
+      if (report !== undefined)
+        await renderHtml(report, result.data.locale, result.data.templateId);
+      setMessage("非敏感设置已重置。");
+    }
+  }
+
+  async function saveSessionApiKey(apiKey: string) {
+    const result = await desktopWindow.donecheck?.credentials.setSessionApiKey({ apiKey });
+    if (result?.ok) setCredentialStatus(result.data.credentialStatus);
+  }
+
+  async function clearSessionApiKey() {
+    const result = await desktopWindow.donecheck?.credentials.clearSessionApiKey();
+    if (result?.ok) setCredentialStatus(result.data.credentialStatus);
+  }
+
+  async function updateRecentWorkspaces(nextWorkspaceDir: string) {
+    if (nextWorkspaceDir.trim().length === 0) return;
+    await updateSettings({
+      defaultWorkspaceDir: nextWorkspaceDir,
+      recentWorkspaces: [nextWorkspaceDir, ...settings.recentWorkspaces],
+    });
   }
 
   async function exportHtml() {
@@ -161,9 +306,26 @@ export function App() {
       <section className="panel controls">
         <div className="title-block">
           <p className="eyebrow">DoneCheck Desktop</p>
-          <h1>阶段 6 GUI</h1>
-          <p>GUI 只消费 core pipeline 与 report-ui 展示结果，不重算规则。</p>
+          <h1>Stage 8.5 GUI</h1>
+          <p>
+            当前 Provider mode：
+            {settings.providerMode === "mock" ? "Deterministic mock" : "OpenAI-compatible"}
+          </p>
         </div>
+
+        <button onClick={() => setSettingsOpen(true)} type="button">
+          Settings
+        </button>
+        <SettingsPanel
+          credentialStatus={credentialStatus}
+          isOpen={settingsOpen}
+          onClearSessionApiKey={clearSessionApiKey}
+          onClose={() => setSettingsOpen(false)}
+          onSaveSessionApiKey={saveSessionApiKey}
+          onSettingsChange={updateSettings}
+          onSettingsReset={resetSettings}
+          settings={settings}
+        />
 
         <label>
           Workspace
@@ -203,8 +365,8 @@ export function App() {
           <label>
             Locale
             <select
-              onChange={(event) => changeLocale(event.currentTarget.value as Locale)}
-              value={locale}
+              onChange={(event) => updateSettings({ locale: event.currentTarget.value as Locale })}
+              value={settings.locale}
             >
               <option value="zh-CN">中文</option>
               <option value="en">English</option>
@@ -213,8 +375,10 @@ export function App() {
           <label>
             Template
             <select
-              onChange={(event) => changeTemplate(event.currentTarget.value as ReportTemplateId)}
-              value={templateId}
+              onChange={(event) =>
+                updateSettings({ templateId: event.currentTarget.value as ReportTemplateId })
+              }
+              value={settings.templateId}
             >
               {reportTemplates.map((template) => (
                 <option key={template.id} value={template.id}>
@@ -239,7 +403,17 @@ export function App() {
             刷新历史
           </button>
         </div>
+        {pendingDecomposition === undefined ? null : (
+          <DecompositionReviewPanel
+            decomposition={pendingDecomposition}
+            onCancel={cancelDecomposition}
+            onConfirm={confirmDecomposition}
+          />
+        )}
         <p className={`status ${status}`}>{message}</p>
+        {providerError === undefined ? null : (
+          <ProviderErrorNotice error={providerError} onOpenSettings={() => setSettingsOpen(true)} />
+        )}
         <section className="history-list">
           <h2>历史记录</h2>
           {history.length === 0 ? (
@@ -269,11 +443,17 @@ export function App() {
         </section>
       </section>
 
-      <section className="panel preview">
+      <section
+        className={settings.showDebugSections ? "panel preview" : "panel preview hide-debug"}
+      >
         {report === undefined ? (
           <div className="empty-state">暂无报告。分析完成后将在这里展示 JudgementReport。</div>
         ) : (
-          <ReportPreview locale={locale} report={report} templateId={templateId} />
+          <ReportPreview
+            locale={settings.locale}
+            report={report}
+            templateId={settings.templateId}
+          />
         )}
       </section>
     </main>

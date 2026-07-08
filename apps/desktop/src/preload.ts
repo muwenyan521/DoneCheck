@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import {
   type AnalyzeRequest,
+  type CredentialSetSessionApiKeyRequest,
+  type CredentialStatusResponse,
   DESKTOP_API_KEYS,
+  type DecomposeRequest,
+  type DecomposeResponse,
   type DesktopApi,
   type DesktopIpcResult,
   type ExportHtmlRequest,
@@ -14,11 +18,14 @@ import {
   type JudgementReport,
   type RenderHtmlRequest,
   type SelectWorkspaceResponse,
+  type SettingsSetRequest,
 } from "./ipc-contract.js";
+import type { DesktopSettings } from "./settings-store.js";
 
 export type DesktopApiChannel = (typeof DESKTOP_API_KEYS)[number];
 
 const api: DesktopApi = {
+  decompose: (req: DecomposeRequest) => invoke<DecomposeResponse>("donecheck:decompose", req),
   analyze: (req: AnalyzeRequest) => invoke<JudgementReport>("donecheck:analyze", req),
   renderHtml: (req: RenderHtmlRequest) => invoke("donecheck:render-html", req),
   selectWorkspace: () => invoke<SelectWorkspaceResponse>("donecheck:select-workspace"),
@@ -29,6 +36,18 @@ const api: DesktopApi = {
     save: (req: HistorySaveRequest) => invoke<HistoryEntry>("donecheck:history:save", req),
     delete: (req: HistoryDeleteRequest) =>
       invoke<{ readonly deleted: boolean }>("donecheck:history:delete", req),
+  },
+  settings: {
+    get: () => invoke<DesktopSettings>("donecheck:settings:get"),
+    set: (req: SettingsSetRequest) => invoke<DesktopSettings>("donecheck:settings:set", req),
+    reset: () => invoke<DesktopSettings>("donecheck:settings:reset"),
+  },
+  credentials: {
+    setSessionApiKey: (req: CredentialSetSessionApiKeyRequest) =>
+      invoke<CredentialStatusResponse>("donecheck:credentials:set-session-api-key", req),
+    clearSessionApiKey: () =>
+      invoke<CredentialStatusResponse>("donecheck:credentials:clear-session-api-key"),
+    status: () => invoke<CredentialStatusResponse>("donecheck:credentials:status"),
   },
 };
 

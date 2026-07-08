@@ -44,8 +44,10 @@
     "@donecheck/shared": "workspace:*",
     "@donecheck/templates": "workspace:*",
     "better-sqlite3": "catalog:",
+    "openai": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "undici": "catalog:"
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",

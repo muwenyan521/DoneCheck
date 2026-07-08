@@ -8,6 +8,11 @@ import type {
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
+import {
+  type NormalizationGuide,
+  buildStrictCompatResponseFormat,
+  normalizeProviderOutput,
+} from "./structured-output-compat.js";
 
 export class ProviderConfigError extends Error {
   constructor(message: string) {
@@ -60,7 +65,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
   async generateObject<T = unknown>(
     input: GenerateObjectInput<T>,
   ): Promise<GenerateObjectResult<T>> {
-    const responseFormat = buildResponseFormat(
+    const { responseFormat, guide } = buildStrictCompatResponseFormat(
       input.schema as z.ZodType<T>,
       input.schemaName,
       this.structuredOutputStrict,
@@ -96,6 +101,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
         input,
         fallback.choices[0]?.message?.content,
         messages,
+        guide,
       );
       return {
         metadata: {
@@ -124,9 +130,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
         },
       ],
       stream: false,
-      ...(isDeepSeekCompatibility(this.baseURL)
-        ? { reasoning_effort: "high", thinking: { type: "enabled" } }
-        : {}),
+      ...resolveReasoningOptions(),
     } as never;
   }
 
@@ -134,8 +138,9 @@ export class OpenAIProvider implements ProviderWithMetadata {
     input: GenerateObjectInput<T>,
     content: unknown,
     messages: readonly { readonly role: "system" | "user"; readonly content: string }[],
+    guide: NormalizationGuide,
   ): Promise<{ parsed: T }> {
-    const first = parseAndValidateFallbackContent(input, content);
+    const first = parseAndValidateFallbackContent(input, content, guide);
     if (first.ok) return { parsed: first.value };
     const repair = await this.client.chat.completions.create(
       this.buildFallbackRequest(
@@ -144,7 +149,11 @@ export class OpenAIProvider implements ProviderWithMetadata {
         buildRepairInstruction(input.schemaName, content, first.error),
       ),
     );
-    const second = parseAndValidateFallbackContent(input, repair.choices[0]?.message?.content);
+    const second = parseAndValidateFallbackContent(
+      input,
+      repair.choices[0]?.message?.content,
+      guide,
+    );
     if (second.ok) return { parsed: second.value };
     throw new Error(second.error);
   }
@@ -165,27 +174,16 @@ function isJsonParseError(error: unknown): boolean {
   return lower.includes("is not valid json") || lower.includes("unexpected token");
 }
 
-function isDeepSeekCompatibility(baseURL: string | undefined): boolean {
-  return baseURL?.includes("deepseek.com") ?? false;
-}
-
-function buildResponseFormat<T>(
-  schema: z.ZodType<T>,
-  schemaName: string,
-  strict: boolean,
-): ReturnType<typeof zodResponseFormat> {
-  const responseFormat = zodResponseFormat(schema, schemaName);
-  return {
-    ...responseFormat,
-    json_schema: {
-      ...responseFormat.json_schema,
-      strict,
-    },
-  };
+function resolveReasoningOptions(): Record<string, unknown> {
+  const effort = process.env.OPENAI_REASONING_EFFORT;
+  if (effort === undefined || effort.length === 0) return {};
+  const normalized = effort.toLocaleLowerCase();
+  if (!["low", "medium", "high"].includes(normalized)) return {};
+  return { reasoning_effort: normalized, thinking: { type: "enabled" } };
 }
 
 function buildJsonOnlyInstruction<T>(input: GenerateObjectInput<T>): string {
-  const responseFormat = zodResponseFormat(input.schema as z.ZodType<T>, input.schemaName);
+  const responseFormat = silentZodResponseFormat(input.schema as z.ZodType<T>, input.schemaName);
   return [
     `Return only one valid JSON object for schema ${input.schemaName}.`,
     "Do not use Markdown.",
@@ -198,6 +196,19 @@ function buildJsonOnlyInstruction<T>(input: GenerateObjectInput<T>): string {
     "JSON schema:",
     JSON.stringify(responseFormat, null, 2),
   ].join("\n");
+}
+
+function silentZodResponseFormat<T>(
+  schema: z.ZodType<T>,
+  name: string,
+): ReturnType<typeof zodResponseFormat> {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    return zodResponseFormat(schema, name);
+  } finally {
+    console.warn = originalWarn;
+  }
 }
 
 function buildRepairInstruction(schemaName: string, content: unknown, error: string): string {
@@ -215,12 +226,15 @@ function buildRepairInstruction(schemaName: string, content: unknown, error: str
 function parseAndValidateFallbackContent<T>(
   input: GenerateObjectInput<T>,
   content: unknown,
+  guide: NormalizationGuide,
 ): { ok: true; value: T } | { ok: false; error: string } {
   if (typeof content !== "string" || content.length === 0) {
     return { ok: false, error: `OpenAI returned no JSON content for schema ${input.schemaName}` };
   }
   try {
-    return { ok: true, value: input.schema.parse(JSON.parse(extractJsonObject(content))) };
+    const raw = JSON.parse(extractJsonObject(content));
+    const normalized = normalizeProviderOutput(raw, guide);
+    return { ok: true, value: input.schema.parse(normalized) };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

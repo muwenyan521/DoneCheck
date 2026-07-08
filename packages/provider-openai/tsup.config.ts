@@ -3,6 +3,11 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   ...nodeLibraryPreset,
+  dts: {
+    compilerOptions: {
+      composite: false,
+    },
+  },
   entry: ["src/index.ts"],
   external: ["openai", "@donecheck/core"],
 });

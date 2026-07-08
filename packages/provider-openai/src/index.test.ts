@@ -28,7 +28,7 @@ function fallbackClient(contents: readonly string[], calls: unknown[]) {
           return {
             choices: [{ message: { content } }],
             usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-            model: "deepseek-v4-flash",
+            model: "compatible-model",
           };
         },
       },
@@ -325,16 +325,15 @@ describe("OpenAIProvider", () => {
             return {
               choices: [{ message: { content: '{"candidateFiles":["a.ts"]}' } }],
               usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-              model: "deepseek-v4-flash",
+              model: "compatible-model",
             };
           },
         },
       },
     };
     const provider = new OpenAIProvider({
-      baseURL: "https://api.deepseek.com",
       client: fakeClient as never,
-      model: "deepseek-v4-flash",
+      model: "compatible-model",
     });
     const z = await import("zod");
     const result = await provider.generateObject({
@@ -344,14 +343,14 @@ describe("OpenAIProvider", () => {
     });
 
     expect(result.object).toEqual({ candidateFiles: ["a.ts"] });
-    expect(result.metadata.model).toBe("deepseek-v4-flash");
+    expect(result.metadata.model).toBe("compatible-model");
     expect(result.usage.totalTokens).toBe(7);
     expect(createArgs).toMatchObject({
-      model: "deepseek-v4-flash",
-      reasoning_effort: "high",
+      model: "compatible-model",
       stream: false,
-      thinking: { type: "enabled" },
     });
+    expect(JSON.stringify(createArgs)).not.toContain("reasoning_effort");
+    expect(JSON.stringify(createArgs)).not.toContain("thinking");
     expect(JSON.stringify(createArgs)).toContain("Return only one valid JSON object");
     expect(JSON.stringify(createArgs)).toContain("Test");
     expect(JSON.stringify(createArgs)).toContain("candidateFiles");
@@ -371,7 +370,7 @@ describe("OpenAIProvider", () => {
     );
     const provider = new OpenAIProvider({
       client: fakeClient as never,
-      model: "deepseek-v4-flash",
+      model: "compatible-model",
     });
     const z = await import("zod");
     const result = await provider.generateObject({
@@ -403,7 +402,7 @@ describe("OpenAIProvider", () => {
     );
     const provider = new OpenAIProvider({
       client: fakeClient as never,
-      model: "deepseek-v4-flash",
+      model: "compatible-model",
     });
     const z = await import("zod");
 
@@ -423,42 +422,90 @@ describe("OpenAIProvider", () => {
     expect(createArgs).toHaveLength(2);
   });
 
-  it("uses DeepSeek-only fields only for DeepSeek compatibility", async () => {
+  it("adds reasoning_effort and thinking when OPENAI_REASONING_EFFORT is set", async () => {
     process.env.OPENAI_API_KEY = "sk-test";
-    const deepseekArgs: unknown[] = [];
-    const regularArgs: unknown[] = [];
-    const z = await import("zod");
-    await new OpenAIProvider({
-      baseURL: "https://api.deepseek.com",
-      client: fallbackClient(['{"ok":true}'], deepseekArgs) as never,
-      model: "deepseek-v4-flash",
-    }).generateObject({
-      prompt: { system: "s", user: "u", version: "v1" },
-      schema: z.object({ ok: z.boolean() }),
-      schemaName: "Ok",
-    });
-    await new OpenAIProvider({
-      baseURL: "https://example.test/v1",
-      client: fallbackClient(['{"ok":true}'], regularArgs) as never,
-      model: "compatible-model",
-    }).generateObject({
-      prompt: { system: "s", user: "u", version: "v1" },
-      schema: z.object({ ok: z.boolean() }),
-      schemaName: "Ok",
-    });
+    const oldReasoning = process.env.OPENAI_REASONING_EFFORT;
+    process.env.OPENAI_REASONING_EFFORT = "high";
+    const createArgs: unknown[] = [];
+    try {
+      const provider = new OpenAIProvider({
+        client: fallbackClient(['{"ok":true}'], createArgs) as never,
+        model: "compatible-model",
+      });
+      const z = await import("zod");
+      await provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      });
 
-    expect(deepseekArgs[0]).toMatchObject({
-      reasoning_effort: "high",
-      thinking: { type: "enabled" },
-    });
-    expect(JSON.stringify(regularArgs[0])).not.toContain("reasoning_effort");
-    expect(JSON.stringify(regularArgs[0])).not.toContain("thinking");
+      expect(createArgs[0]).toMatchObject({
+        reasoning_effort: "high",
+        thinking: { type: "enabled" },
+      });
+    } finally {
+      restoreEnv("OPENAI_REASONING_EFFORT", oldReasoning);
+    }
   });
 
-  it("does not fallback for 401 or 502", async () => {
+  it("does not add reasoning_effort when OPENAI_REASONING_EFFORT is unset", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    const oldReasoning = process.env.OPENAI_REASONING_EFFORT;
+    // biome-ignore lint/performance/noDelete: env vars must be deleted, not set to undefined
+    delete process.env.OPENAI_REASONING_EFFORT;
+    const createArgs: unknown[] = [];
+    try {
+      const provider = new OpenAIProvider({
+        client: fallbackClient(['{"ok":true}'], createArgs) as never,
+        model: "compatible-model",
+      });
+      const z = await import("zod");
+      await provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      });
+
+      expect(JSON.stringify(createArgs[0])).not.toContain("reasoning_effort");
+      expect(JSON.stringify(createArgs[0])).not.toContain("thinking");
+    } finally {
+      restoreEnv("OPENAI_REASONING_EFFORT", oldReasoning);
+    }
+  });
+
+  it("ignores invalid OPENAI_REASONING_EFFORT values", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    const oldReasoning = process.env.OPENAI_REASONING_EFFORT;
+    process.env.OPENAI_REASONING_EFFORT = "extreme";
+    const createArgs: unknown[] = [];
+    try {
+      const provider = new OpenAIProvider({
+        client: fallbackClient(['{"ok":true}'], createArgs) as never,
+        model: "compatible-model",
+      });
+      const z = await import("zod");
+      await provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      });
+
+      expect(JSON.stringify(createArgs[0])).not.toContain("reasoning_effort");
+      expect(JSON.stringify(createArgs[0])).not.toContain("thinking");
+    } finally {
+      restoreEnv("OPENAI_REASONING_EFFORT", oldReasoning);
+    }
+  });
+
+  it("does not fallback for 401, 429, 502, or 504", async () => {
     process.env.OPENAI_API_KEY = "sk-test";
     const z = await import("zod");
-    for (const message of ["401 invalid API key", "502 Upstream request failed"]) {
+    for (const message of [
+      "401 invalid API key",
+      "429 Too Many Requests",
+      "502 Upstream request failed",
+      "504 Gateway Timeout",
+    ]) {
       let createCalls = 0;
       const provider = new OpenAIProvider({
         client: {
@@ -512,7 +559,7 @@ describe("OpenAIProvider", () => {
             return {
               choices: [{ message: { content: '{"ok":true}' } }],
               usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-              model: "MiniMax-M3",
+              model: "compatible-model",
             };
           },
         },
@@ -553,7 +600,7 @@ describe("OpenAIProvider", () => {
               },
             ],
             usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
-            model: "MiniMax-M3",
+            model: "compatible-model",
           }),
         },
       },

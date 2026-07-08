@@ -28,6 +28,8 @@
     "electron:rebuild": "electron-rebuild -f -w better-sqlite3",
     "electron:smoke": "electron --no-sandbox dist/smoke.cjs",
     "electron:start": "electron --no-sandbox dist/electron.cjs",
+    "electron:start:real": "node scripts/start-with-electron-abi.mjs start",
+    "electron:gui:smoke": "node scripts/start-with-electron-abi.mjs smoke",
     "rebuild:node": "pnpm rebuild better-sqlite3",
     "dist:dir": "electron-builder --dir",
     "dist:linux": "electron-builder --linux --x64",

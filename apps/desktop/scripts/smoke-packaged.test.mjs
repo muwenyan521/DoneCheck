@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackage } from "@electron/asar";
 import { describe, expect, it } from "vitest";
-import { inspectPackagedArtifacts } from "./smoke-packaged.mjs";
+import {
+  evaluateGuiSmokeResult,
+  findUnpackedExecutable,
+  inspectPackagedArtifacts,
+} from "./smoke-packaged.mjs";
 
 function createReleaseFixture(
   indexHtml = '<script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css">',
@@ -18,7 +22,7 @@ function createReleaseFixture(
     recursive: true,
   });
   writeFileSync(path.join(release, "DoneCheck Desktop-0.0.0.AppImage"), "appimage");
-  writeFileSync(path.join(release, "linux-unpacked", "DoneCheck Desktop"), "binary");
+  writeFileSync(path.join(release, "linux-unpacked", "donecheck-desktop"), "binary");
   writeFileSync(
     path.join(release, "linux-unpacked", "resources", "app", "dist", "electron.cjs"),
     "main",
@@ -248,6 +252,55 @@ describe("smoke-packaged", () => {
       ).toBe(true);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("evaluateGuiSmokeResult", () => {
+  it("passes only when ok, rendererLoaded, and nativeStorage are all true", () => {
+    expect(evaluateGuiSmokeResult({ ok: true, rendererLoaded: true, nativeStorage: true }).ok).toBe(
+      true,
+    );
+    expect(
+      evaluateGuiSmokeResult({ ok: true, rendererLoaded: false, nativeStorage: true }).ok,
+    ).toBe(false);
+    expect(
+      evaluateGuiSmokeResult({ ok: true, rendererLoaded: true, nativeStorage: false }).ok,
+    ).toBe(false);
+    expect(
+      evaluateGuiSmokeResult({ ok: false, rendererLoaded: true, nativeStorage: true }).ok,
+    ).toBe(false);
+  });
+
+  it("fails when payload is missing or unparseable", () => {
+    expect(evaluateGuiSmokeResult(undefined).ok).toBe(false);
+    expect(evaluateGuiSmokeResult(null).ok).toBe(false);
+    expect(evaluateGuiSmokeResult("not-json").ok).toBe(false);
+  });
+
+  it("does not pass on file existence alone — requires positive nativeStorage flag", () => {
+    expect(evaluateGuiSmokeResult({ ok: true, rendererLoaded: true }).ok).toBe(false);
+  });
+});
+
+describe("findUnpackedExecutable", () => {
+  it("locates the linux-unpacked executable", () => {
+    const fixture = createReleaseFixture();
+    try {
+      const exe = findUnpackedExecutable(fixture.release, "linux");
+      expect(exe).toBeTruthy();
+      expect(exe.endsWith("donecheck-desktop")).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns undefined when no unpacked dir exists", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "donecheck-no-unpacked-"));
+    try {
+      expect(findUnpackedExecutable(root, "linux")).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

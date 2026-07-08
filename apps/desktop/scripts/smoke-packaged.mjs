@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -172,12 +173,158 @@ export function inspectPackagedArtifacts(releaseDir = path.resolve("release")) {
   return { ok, lines };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const result = inspectPackagedArtifacts(
-    process.argv[2] ? path.resolve(process.argv[2]) : undefined,
-  );
-  for (const line of result.lines) {
-    console.log(line);
+export function evaluateGuiSmokeResult(payload) {
+  if (payload === undefined || payload === null) {
+    return { ok: false, lines: ["FAIL packaged gui smoke ready file missing"] };
   }
-  process.exitCode = result.ok ? 0 : 1;
+  let parsed = payload;
+  if (typeof payload === "string") {
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return { ok: false, lines: ["FAIL packaged gui smoke ready file not json"] };
+    }
+  }
+  const ok =
+    parsed?.ok === true && parsed?.rendererLoaded === true && parsed?.nativeStorage === true;
+  const lines = [
+    `${ok ? "PASS" : "FAIL"} packaged gui smoke`,
+    `  rendererLoaded=${parsed?.rendererLoaded}`,
+    `  nativeStorage=${parsed?.nativeStorage}`,
+    parsed?.error ? `  error=${parsed.error}` : null,
+  ].filter(Boolean);
+  return { ok, lines, parsed };
+}
+
+export function findUnpackedExecutable(releaseDir, platform = "linux") {
+  const dir = platform === "win" ? "win-unpacked" : "linux-unpacked";
+  const unpacked = path.join(releaseDir, dir);
+  if (!existsSync(unpacked)) return undefined;
+  const exeName = platform === "win" ? "DoneCheck Desktop.exe" : "donecheck-desktop";
+  const exe = path.join(unpacked, exeName);
+  return existsSync(exe) ? exe : undefined;
+}
+
+export async function runPackagedGuiSmoke({
+  releaseDir,
+  platform = "linux",
+  timeoutMs = 30000,
+  spawn: spawnFn = spawn,
+  env = process.env,
+}) {
+  const exe = findUnpackedExecutable(releaseDir, platform);
+  if (!exe) {
+    return {
+      ok: false,
+      lines: [`FAIL no unpacked executable found for ${platform} gui smoke`],
+    };
+  }
+  const readyFile = path.join(releaseDir, `gui-smoke-ready-${process.pid}.json`);
+  const storageFile = path.join(releaseDir, `gui-smoke-${process.pid}.sqlite`);
+  const childEnv = {
+    ...env,
+    DONECHECK_GUI_SMOKE: "1",
+    DONECHECK_GUI_SMOKE_READY_FILE: readyFile,
+    DONECHECK_GUI_SMOKE_STORAGE_FILE: storageFile,
+  };
+  const child = spawnFn(exe, [], { env: childEnv, stdio: "pipe" });
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (d) => {
+    stdout += d;
+  });
+  child.stderr?.on("data", (d) => {
+    stderr += d;
+  });
+
+  const exited = new Promise((resolve) => {
+    child.on("exit", (code) => resolve({ kind: "exit", code }));
+  });
+  const timer = new Promise((resolve) => setTimeout(() => resolve({ kind: "timeout" }), timeoutMs));
+  const outcome = await Promise.race([exited, timer]);
+
+  if (outcome.kind === "timeout") {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    return {
+      ok: false,
+      lines: [
+        `FAIL packaged gui smoke timed out after ${timeoutMs}ms`,
+        `  stderr=${stderr.slice(-500)}`,
+      ],
+      stdout,
+      stderr,
+    };
+  }
+
+  const content = existsSync(readyFile) ? readFileSync(readyFile, "utf8") : undefined;
+  const result = evaluateGuiSmokeResult(content);
+  return {
+    ok: result.ok,
+    lines: result.lines,
+    stdout,
+    stderr,
+    ready: result.parsed,
+    exitCode: outcome.code,
+  };
+}
+
+export async function runFullPackagedSmoke({
+  releaseDir = path.resolve("release"),
+  platform = "linux",
+  runGui = true,
+  spawn: spawnFn = spawn,
+  env = process.env,
+} = {}) {
+  const structure = inspectPackagedArtifacts(releaseDir);
+  const lines = [...structure.lines];
+  let ok = structure.ok;
+
+  if (runGui) {
+    if (!ok) {
+      lines.push("SKIP packaged gui smoke because structure smoke failed");
+    } else {
+      const gui = await runPackagedGuiSmoke({ releaseDir, platform, spawn: spawnFn, env });
+      lines.push(...gui.lines);
+      ok = ok && gui.ok;
+    }
+  }
+
+  lines.push(
+    `${ok ? "PASS" : "FAIL"} packaged smoke ${ok ? "passed" : "failed"} (structure${runGui ? " + gui" : ""})`,
+  );
+  return { ok, lines, structure, gui: runGui };
+}
+
+function parseCliArgs(argv) {
+  const args = { structureOnly: false, platform: "linux", releaseDir: undefined };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--structure-only") args.structureOnly = true;
+    else if (a === "--gui") args.structureOnly = false;
+    else if (a === "--platform") args.platform = argv[++i];
+    else if (!a.startsWith("--")) args.releaseDir = a;
+  }
+  return args;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const args = parseCliArgs(process.argv.slice(2));
+  const releaseDir = args.releaseDir ? path.resolve(args.releaseDir) : path.resolve("release");
+  runFullPackagedSmoke({
+    releaseDir,
+    platform: args.platform,
+    runGui: !args.structureOnly,
+  })
+    .then((result) => {
+      for (const line of result.lines) console.log(line);
+      process.exitCode = result.ok ? 0 : 1;
+    })
+    .catch((error) => {
+      console.error("packaged smoke runner crashed", error);
+      process.exitCode = 1;
+    });
 }

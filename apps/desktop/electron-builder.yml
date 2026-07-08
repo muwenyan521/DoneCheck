@@ -29,6 +29,7 @@ extraMetadata:
   main: dist/electron.cjs
 linux:
   icon: assets/icons
+  syncDesktopName: true
   target:
     - AppImage
     - deb

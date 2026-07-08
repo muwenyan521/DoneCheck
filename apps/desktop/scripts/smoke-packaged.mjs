@@ -106,7 +106,7 @@ function check(lines, condition, label) {
 }
 
 export function inspectPackagedArtifacts(releaseDir = path.resolve("release")) {
-  const lines = ["Artifact structure smoke only; this does not launch the packaged GUI."];
+  const lines = ["Artifact structure smoke."];
   if (!existsSync(releaseDir)) {
     lines.push(`FAIL release directory missing: ${releaseDir}`);
     return { ok: false, lines };
@@ -279,8 +279,13 @@ export async function runFullPackagedSmoke({
   spawn: spawnFn = spawn,
   env = process.env,
 } = {}) {
+  const lines = [
+    runGui
+      ? "Packaged smoke: structure + real GUI launch (unpacks and spawns the app)."
+      : "Packaged smoke: structure only; this does not launch the packaged GUI.",
+  ];
   const structure = inspectPackagedArtifacts(releaseDir);
-  const lines = [...structure.lines];
+  lines.push(...structure.lines);
   let ok = structure.ok;
 
   if (runGui) {

@@ -5,7 +5,7 @@ on:
 
 jobs:
   linux:
-    name: Linux AppImage and deb
+    name: Linux AppImage, deb, and packaged GUI smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,6 +20,14 @@ jobs:
       - name: Package Linux desktop
         run: nix develop -c pnpm --filter @donecheck/desktop package:linux
 
+      - name: Real packaged GUI smoke (xvfb)
+        run: |
+          nix develop -c bash -c '
+            set -e
+            cd apps/desktop
+            xvfb-run -a node scripts/smoke-packaged.mjs --platform linux
+          '
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -27,7 +35,7 @@ jobs:
           path: apps/desktop/release/**/*
 
   windows:
-    name: Windows NSIS
+    name: Windows NSIS and unpacked
     runs-on: windows-latest
     steps:
       - name: Checkout

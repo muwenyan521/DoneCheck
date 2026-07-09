@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import {
   evaluateGuiSmokeResult,
   findUnpackedExecutable,
   inspectPackagedArtifacts,
+  runPackagedGuiSmoke,
 } from "./smoke-packaged.mjs";
 
 function createReleaseFixture(
@@ -301,6 +303,87 @@ describe("findUnpackedExecutable", () => {
       expect(findUnpackedExecutable(root, "linux")).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+function createMockSpawn({ exitCode = 0, stderrData = "", stdoutData = "", delay = 0 } = {}) {
+  const captured = { exe: null, args: null, env: null };
+  const spawn = (exe, args, options) => {
+    captured.exe = exe;
+    captured.args = args;
+    captured.env = options?.env;
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    setTimeout(() => {
+      if (stdoutData) child.stdout.emit("data", stdoutData);
+      if (stderrData) child.stderr.emit("data", stderrData);
+      child.emit("exit", exitCode);
+    }, delay);
+    return child;
+  };
+  return { spawn, captured };
+}
+
+describe("runPackagedGuiSmoke", () => {
+  it("passes --no-sandbox to the packaged executable", async () => {
+    const fixture = createReleaseFixture();
+    try {
+      const { spawn, captured } = createMockSpawn({ exitCode: 1 });
+      await runPackagedGuiSmoke({
+        releaseDir: fixture.release,
+        platform: "linux",
+        spawn,
+      });
+      expect(captured.args).toContain("--no-sandbox");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("prints child exitCode, stderr, and stdout when ready file is missing", async () => {
+    const fixture = createReleaseFixture();
+    try {
+      const { spawn } = createMockSpawn({
+        exitCode: 1,
+        stderrData: "Failed to move to new namespace: Operation not permitted",
+        stdoutData: "some diagnostic output",
+      });
+      const result = await runPackagedGuiSmoke({
+        releaseDir: fixture.release,
+        platform: "linux",
+        spawn,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.lines.some((line) => line.includes("child exitCode=1"))).toBe(true);
+      expect(result.lines.some((line) => line.includes("Failed to move to new namespace"))).toBe(
+        true,
+      );
+      expect(result.lines.some((line) => line.includes("some diagnostic output"))).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not print diagnostics when ready file contains a passing payload", async () => {
+    const fixture = createReleaseFixture();
+    try {
+      const readyFile = path.join(fixture.release, `gui-smoke-ready-${process.pid}.json`);
+      writeFileSync(
+        readyFile,
+        '{"ok":true,"rendererLoaded":true,"nativeStorage":true,"details":{"settingsRoundtrip":true,"resetVerified":true},"error":null,"durationMs":100}\n',
+      );
+      const { spawn } = createMockSpawn({ exitCode: 0 });
+      const result = await runPackagedGuiSmoke({
+        releaseDir: fixture.release,
+        platform: "linux",
+        spawn,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.lines.some((line) => line.includes("child exitCode"))).toBe(false);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
     }
   });
 });

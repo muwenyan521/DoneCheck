@@ -227,7 +227,7 @@ export async function runPackagedGuiSmoke({
     DONECHECK_GUI_SMOKE_READY_FILE: readyFile,
     DONECHECK_GUI_SMOKE_STORAGE_FILE: storageFile,
   };
-  const child = spawnFn(exe, [], { env: childEnv, stdio: "pipe" });
+  const child = spawnFn(exe, ["--no-sandbox"], { env: childEnv, stdio: "pipe" });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (d) => {
@@ -262,9 +262,17 @@ export async function runPackagedGuiSmoke({
 
   const content = existsSync(readyFile) ? readFileSync(readyFile, "utf8") : undefined;
   const result = evaluateGuiSmokeResult(content);
+  const lines = [...result.lines];
+  if (content === undefined || result.ok === false) {
+    lines.push(
+      `  child exitCode=${outcome.code}`,
+      `  stderr=${stderr.slice(-800) || "(empty)"}`,
+      `  stdout=${stdout.slice(-400) || "(empty)"}`,
+    );
+  }
   return {
     ok: result.ok,
-    lines: result.lines,
+    lines,
     stdout,
     stderr,
     ready: result.parsed,

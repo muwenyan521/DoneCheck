@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const targets = new Map([
   ["dir", "dist:dir"],
@@ -72,37 +73,12 @@ export function runPackageWithAbiRestore(
 export function createDefaultRunner() {
   if (process.platform === "win32") {
     const comspec = process.env.ComSpec || "cmd.exe";
-    let diagnosed = false;
-    return (command, args) => {
-      if (!diagnosed) {
-        diagnosed = true;
-        console.error("[package-with-abi-restore] win32 diagnostic:");
-        console.error(`  ComSpec=${comspec}`);
-        console.error(`  node=${process.execPath}`);
-        const where = spawnSync(comspec, ["/c", "where", "pnpm.cmd"], { encoding: "utf8" });
-        console.error(
-          `  where pnpm.cmd: ${where.stdout?.trim() || where.stderr?.trim() || "not found"} (status=${where.status})`,
-        );
-        const ver = spawnSync(comspec, ["/c", "pnpm.cmd", "--version"], { encoding: "utf8" });
-        console.error(
-          `  pnpm.cmd --version: stdout=${ver.stdout?.trim() || "(empty)"} stderr=${ver.stderr?.trim() || "(empty)"} status=${ver.status}`,
-        );
-      }
-      console.error(
-        `[package-with-abi-restore] spawning: ${comspec} /d /s /c ${command} ${args.join(" ")}`,
-      );
-      const result = spawnSync(comspec, ["/d", "/s", "/c", command, ...args], {
-        stdio: "inherit",
-      });
-      console.error(
-        `[package-with-abi-restore] result: status=${result.status} signal=${result.signal} error=${result.error?.message ?? "none"}`,
-      );
-      return result;
-    };
+    return (command, args) =>
+      spawnSync(comspec, ["/d", "/s", "/c", command, ...args], { stdio: "inherit" });
   }
   return (command, args) => spawnSync(command, args, { stdio: "inherit" });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.exitCode = runPackageWithAbiRestore(process.argv.slice(2), createDefaultRunner());
 }

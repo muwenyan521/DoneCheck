@@ -73,26 +73,6 @@ jobs:
       - name: Build workspace dependencies
         run: pnpm build
 
-      - name: Debug pnpm resolution
-        shell: pwsh
-        run: |
-          Write-Host "=== ComSpec ==="
-          Write-Host $env:ComSpec
-          Write-Host "=== Get-Command pnpm ==="
-          Get-Command pnpm -ErrorAction SilentlyContinue | Format-List
-          Write-Host "=== Get-Command pnpm.cmd ==="
-          Get-Command pnpm.cmd -ErrorAction SilentlyContinue | Format-List
-          Write-Host "=== pnpm --version ==="
-          pnpm --version
-          Write-Host "=== cmd.exe /c pnpm.cmd --version ==="
-          & cmd.exe /d /s /c "pnpm.cmd --version"
-          Write-Host "=== node spawnSync: cmd.exe joined ==="
-          node -e 'const{spawnSync}=require("child_process");const r=spawnSync(process.env.ComSpec||"cmd.exe",["/d","/s","/c","pnpm.cmd --version"],{stdio:"inherit"});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-          Write-Host "=== node spawnSync: cmd.exe separate args ==="
-          node -e 'const{spawnSync}=require("child_process");const r=spawnSync(process.env.ComSpec||"cmd.exe",["/d","/s","/c","pnpm.cmd","--version"],{stdio:"inherit"});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-          Write-Host "=== node spawnSync: pnpm shell:true ==="
-          node -e 'const{spawnSync}=require("child_process");const r=spawnSync("pnpm",["--version"],{stdio:"inherit",shell:true});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-
       - name: Package Windows desktop
         run: pnpm --filter @donecheck/desktop package:win
 

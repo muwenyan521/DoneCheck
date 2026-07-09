@@ -69,9 +69,18 @@ export function runPackageWithAbiRestore(
   return exitCode;
 }
 
+export function createDefaultRunner() {
+  if (process.platform === "win32") {
+    return (command, args) => {
+      const fullCommand = [command, ...args].join(" ");
+      return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", fullCommand], {
+        stdio: "inherit",
+      });
+    };
+  }
+  return (command, args) => spawnSync(command, args, { stdio: "inherit" });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const isWin = process.platform === "win32";
-  process.exitCode = runPackageWithAbiRestore(process.argv.slice(2), (command, args) =>
-    spawnSync(command, args, { stdio: "inherit", shell: isWin }),
-  );
+  process.exitCode = runPackageWithAbiRestore(process.argv.slice(2), createDefaultRunner());
 }

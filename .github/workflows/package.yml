@@ -28,11 +28,23 @@ jobs:
             xvfb-run -a node scripts/smoke-packaged.mjs --platform linux
           '
 
+      - name: Assert release artifacts
+        shell: bash
+        run: |
+          set -e
+          if [ ! -d apps/desktop/release ] || [ -z "$(ls -A apps/desktop/release)" ]; then
+            echo "::error::apps/desktop/release is missing or empty"
+            exit 1
+          fi
+          echo "Release contents:"
+          ls -la apps/desktop/release
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: donecheck-desktop-linux
           path: apps/desktop/release/**/*
+          if-no-files-found: error
 
   windows:
     name: Windows NSIS and unpacked
@@ -58,8 +70,20 @@ jobs:
       - name: Package Windows desktop
         run: pnpm --filter @donecheck/desktop package:win
 
+      - name: Assert release artifacts
+        shell: bash
+        run: |
+          set -e
+          if [ ! -d apps/desktop/release ] || [ -z "$(ls -A apps/desktop/release)" ]; then
+            echo "::error::apps/desktop/release is missing or empty"
+            exit 1
+          fi
+          echo "Release contents:"
+          ls -la apps/desktop/release
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: donecheck-desktop-windows
           path: apps/desktop/release/**/*
+          if-no-files-found: error

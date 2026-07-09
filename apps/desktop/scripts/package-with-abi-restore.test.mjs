@@ -60,4 +60,54 @@ describe("package-with-abi-restore", () => {
       "pnpm rebuild:node",
     ]);
   });
+
+  it("uses pnpm.cmd on win32 for every pnpm invocation", () => {
+    const recorder = createRecorder();
+    const result = runPackageWithAbiRestore(["win"], recorder.runner, { platform: "win32" });
+
+    expect(result).toBe(0);
+    expect(recorder.calls).toEqual([
+      "pnpm.cmd build",
+      "pnpm.cmd electron:rebuild",
+      "pnpm.cmd dist:win",
+      "pnpm.cmd rebuild:node",
+    ]);
+  });
+
+  it("returns non-zero and stops when spawn fails with ENOENT (result.error set)", () => {
+    const calls = [];
+    const runner = (command, args) => {
+      calls.push([command, ...args].join(" "));
+      return { error: new Error(`spawn ${command} ENOENT`), status: null };
+    };
+    const result = runPackageWithAbiRestore(["win"], runner, { platform: "win32" });
+
+    expect(result).toBe(1);
+    expect(calls).toEqual(["pnpm.cmd build"]);
+  });
+
+  it("returns non-zero when status is null without error (signal kill)", () => {
+    const calls = [];
+    const runner = (command, args) => {
+      calls.push([command, ...args].join(" "));
+      return { status: null, signal: "SIGTERM" };
+    };
+    const result = runPackageWithAbiRestore(["win"], runner, { platform: "win32" });
+
+    expect(result).toBe(1);
+    expect(calls).toEqual(["pnpm.cmd build"]);
+  });
+
+  it("does not restore Node ABI when build fails before electron:rebuild on win32", () => {
+    const calls = [];
+    const runner = (command, args) => {
+      const key = [command, ...args].join(" ");
+      calls.push(key);
+      return { status: key === "pnpm.cmd build" ? 1 : 0 };
+    };
+    const result = runPackageWithAbiRestore(["win"], runner, { platform: "win32" });
+
+    expect(result).toBe(1);
+    expect(calls).toEqual(["pnpm.cmd build"]);
+  });
 });

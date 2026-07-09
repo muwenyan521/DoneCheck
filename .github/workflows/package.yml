@@ -74,32 +74,24 @@ jobs:
         run: pnpm build
 
       - name: Debug pnpm resolution
-        shell: bash
+        shell: pwsh
         run: |
-          set +e
-          echo "=== ComSpec ==="
-          echo "$ComSpec"
-          echo "=== which pnpm ==="
-          which pnpm 2>&1
-          echo "=== which pnpm.cmd ==="
-          which pnpm.cmd 2>&1
-          echo "=== ls corepack shims ==="
-          ls -la "$(dirname "$(which node)")"/pnpm* 2>&1
-          echo "=== pnpm --version (bash direct) ==="
-          pnpm --version 2>&1
-          echo "=== cmd.exe /c pnpm.cmd --version ==="
-          "$ComSpec" /d /s /c "pnpm.cmd --version" 2>&1
-          echo "=== cmd.exe /c pnpm --version ==="
-          "$ComSpec" /d /s /c "pnpm --version" 2>&1
-          echo "=== node spawnSync: cmd.exe joined ==="
+          Write-Host "=== ComSpec ==="
+          Write-Host $env:ComSpec
+          Write-Host "=== Get-Command pnpm ==="
+          Get-Command pnpm -ErrorAction SilentlyContinue | Format-List
+          Write-Host "=== Get-Command pnpm.cmd ==="
+          Get-Command pnpm.cmd -ErrorAction SilentlyContinue | Format-List
+          Write-Host "=== pnpm --version ==="
+          pnpm --version
+          Write-Host "=== cmd.exe /c pnpm.cmd --version ==="
+          & cmd.exe /d /s /c "pnpm.cmd --version"
+          Write-Host "=== node spawnSync: cmd.exe joined ==="
           node -e 'const{spawnSync}=require("child_process");const r=spawnSync(process.env.ComSpec||"cmd.exe",["/d","/s","/c","pnpm.cmd --version"],{stdio:"inherit"});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-          echo "=== node spawnSync: cmd.exe separate args ==="
+          Write-Host "=== node spawnSync: cmd.exe separate args ==="
           node -e 'const{spawnSync}=require("child_process");const r=spawnSync(process.env.ComSpec||"cmd.exe",["/d","/s","/c","pnpm.cmd","--version"],{stdio:"inherit"});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-          echo "=== node spawnSync: pnpm.cmd shell:true ==="
-          node -e 'const{spawnSync}=require("child_process");const r=spawnSync("pnpm.cmd",["--version"],{stdio:"inherit",shell:true});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-          echo "=== node spawnSync: pnpm shell:true ==="
+          Write-Host "=== node spawnSync: pnpm shell:true ==="
           node -e 'const{spawnSync}=require("child_process");const r=spawnSync("pnpm",["--version"],{stdio:"inherit",shell:true});console.log(JSON.stringify({status:r.status,signal:r.signal,error:r.error?r.error.message:null}))'
-          exit 0
 
       - name: Package Windows desktop
         run: pnpm --filter @donecheck/desktop package:win

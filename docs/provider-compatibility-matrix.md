@@ -83,7 +83,7 @@
 | `response_format unavailable` | DeepSeek / MiniMax 等不支持 `response_format` 的端点 | `isUnsupportedResponseFormatError` 捕获后走 fallback 纯文本 JSON 路径；`provider-error-ux` 分类为 `response-format` | 否（fallback 兜底） |
 | 推理 think 标签混入 JSON | DeepSeek 等返回带推理标签的端点 | `extractJsonObject` 用正则剥离 think 标签后再提取 JSON | 否（已修复） |
 | `Premature close` | 连接被端点提前关闭 | `provider-error-ux` 分类为 `connection-closed`，建议 retry | 偶发，retry 通常可恢复 |
-| EvidenceRef span 精度问题（整文件 span 超出 snippet window） | MiniMax 等 fallback 路径 | fallback instruction 明确要求“use only exact filePath, lineStart, and lineEnd ranges present in the provided evidence snippets”；Evidence Guard v2 是后续独立 core 规格提案（Stage 8.8） | 不阻塞 Demo 结构，但影响真实证据精度 |
+| EvidenceRef span 精度问题（整文件 span 超出 snippet window） | MiniMax 等 fallback 路径 | fallback instruction 明确要求“use only exact filePath, lineStart, and lineEnd ranges present in the provided evidence snippets”；Stage 8.8 已实现 `evidence-ref-normalization`：近邻匹配（lineTolerance=1、overlapRatio≥0.8）的模型引用被规范化为真实候选 snippet，超出容差或歧义匹配的引用仍被拒绝 | 不阻塞 Demo 结构；近邻行号漂移已由 8.8 规范化兜底，整文件 span 仍依赖 fallback instruction |
 | `OPENAI_STRUCTURED_OUTPUT_STRICT must be one of ...` | env 值非法 | `resolveStructuredOutputStrict` 抛 `ProviderConfigError`；`provider-error-ux` 分类为 `strict-output` | 是配置错误，修正 env 即可 |
 | `OpenAI-compatible mode requires an API key` | GUI openai-compatible 模式缺 key | `createDesktopProviderFactory` 显式抛错，**不** silent fallback 到 mock；`provider-error-ux` 分类为 `missing-key` | 是配置错误，输入 session key 或切 mock |
 | packaged GUI smoke `ready file missing` | Linux packaged smoke（历史 CI run 曾出现） | 已通过 `--no-sandbox`（commit `a463827`）修复，最新 CI run `29025568215` PASS | 否（已修复） |
@@ -97,7 +97,7 @@
 4. **mock 只保证结构路径，不保证真实判断质量**：deterministic mock 的 `judgementDraft` 固定为 `partial`，`evidenceRefs` 来自 prompt payload 的静态抽取，不代表真实 LLM 语义判断。
 5. **strict 模式不是保证**：`structured-output-compat` 层与 fallback repair 路径是兼容缓解措施，不意味着所有 OpenAI-compatible 端点都能在 strict=true 下稳定工作。推荐 Demo 用 strict=false。
 6. **Windows 打包未经验证不声称支持**：CI 产出 Windows NSIS 与 `win-unpacked` 制品，但未配置 Windows GUI smoke；在 Windows runner 实跑 GUI smoke 之前，Windows 状态保持 ⏸️ Not validated。
-7. **Evidence Guard v2 不在本阶段范围**：evidenceRef 精度的进一步加固属于 Stage 8.8 独立 core 规格提案，本兼容矩阵不放宽现有 evidence guard，也不承诺 v2 行为。
+7. **Evidence ref 规范化（Stage 8.8 已实现）**：`evidence-ref-normalization` 对模型返回的 evidenceRef 做近邻匹配（lineTolerance=1、overlapRatio≥0.8），命中的近邻引用被规范化为真实候选 snippet，未命中或歧义匹配的引用仍被拒绝（保持 unmatched 断言语义）。这兜底了模型行号轻微漂移，但不放宽对整文件 span 超出 snippet window 的约束。
 
 ## 6. 验证可复现性
 

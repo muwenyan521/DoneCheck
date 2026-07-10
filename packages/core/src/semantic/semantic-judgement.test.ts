@@ -320,6 +320,146 @@ describe("draftSemanticJudgement", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("accepts very-near miss evidence ref and canonicalizes it to the real candidate snippet", async () => {
+    const result = await draftSemanticJudgement({
+      evidenceSnippets: [
+        {
+          filePath: "src/components/LoginForm.tsx",
+          id: "ev-1",
+          lineEnd: 40,
+          lineStart: 1,
+          summary: "Login form with email and password fields.",
+          text: "export function LoginForm() { /* ... */ }",
+        },
+      ],
+      provider: providerReturning({
+        confidence: 0.85,
+        evidenceRefs: [
+          {
+            filePath: "src/components/LoginForm.tsx",
+            lineEnd: 41,
+            lineStart: 1,
+            snippetSummary: "model-fabricated summary for login form",
+          },
+        ],
+        explanation: "Login form satisfies the requirement.",
+        judgementDraft: "fulfilled",
+        matchedRequirementId: "req-1",
+        repairSuggestion: "No repair needed.",
+      }),
+      requirement: { id: "req-1", text: "Login form accepts email and password." },
+    });
+
+    expect(result.judgementDraft).toBe("fulfilled");
+    expect(result.evidenceRefs).toHaveLength(1);
+    expect(result.evidenceRefs[0]?.lineStart).toBe(1);
+    expect(result.evidenceRefs[0]?.lineEnd).toBe(40);
+    expect(result.evidenceRefs[0]?.snippetSummary).toBe(
+      "Login form with email and password fields.",
+    );
+  });
+
+  it("still rejects broad evidence ref that exceeds near-miss tolerance", async () => {
+    await expect(
+      draftSemanticJudgement({
+        evidenceSnippets: [
+          {
+            filePath: "src/components/LoginForm.tsx",
+            id: "ev-1",
+            lineEnd: 40,
+            lineStart: 1,
+            summary: "Login form with email and password fields.",
+            text: "export function LoginForm() { /* ... */ }",
+          },
+        ],
+        provider: providerReturning({
+          confidence: 0.7,
+          evidenceRefs: [
+            {
+              filePath: "src/components/LoginForm.tsx",
+              lineEnd: 44,
+              lineStart: 1,
+              snippetSummary: "broad reference to login form",
+            },
+          ],
+          explanation: "References the login form broadly.",
+          judgementDraft: "fulfilled",
+          matchedRequirementId: "req-1",
+          repairSuggestion: "No repair needed.",
+        }),
+        requirement: { id: "req-1", text: "Login form accepts email and password." },
+      }),
+    ).rejects.toThrow("not present in candidate evidence snippets");
+  });
+
+  it("still rejects evidence ref whose filePath does not match any candidate", async () => {
+    await expect(
+      draftSemanticJudgement({
+        evidenceSnippets: [
+          {
+            filePath: "src/components/LoginForm.tsx",
+            id: "ev-1",
+            lineEnd: 40,
+            lineStart: 1,
+            summary: "Login form.",
+            text: "export function LoginForm() {}",
+          },
+        ],
+        provider: providerReturning({
+          confidence: 0.7,
+          evidenceRefs: [
+            {
+              filePath: "src/components/OtherForm.tsx",
+              lineEnd: 40,
+              lineStart: 1,
+              snippetSummary: "other form",
+            },
+          ],
+          explanation: "References a different file.",
+          judgementDraft: "suspicious",
+          matchedRequirementId: "req-1",
+          repairSuggestion: "Check evidence extraction.",
+        }),
+        requirement: { id: "req-1", text: "Login form accepts email and password." },
+      }),
+    ).rejects.toThrow("not present in candidate evidence snippets");
+  });
+
+  it("preserves exact-match behaviour when the model ref matches a candidate exactly", async () => {
+    const result = await draftSemanticJudgement({
+      evidenceSnippets: [
+        {
+          filePath: "src/components/LoginForm.tsx",
+          id: "ev-1",
+          lineEnd: 40,
+          lineStart: 1,
+          summary: "Login form.",
+          text: "export function LoginForm() {}",
+        },
+      ],
+      provider: providerReturning({
+        confidence: 0.9,
+        evidenceRefs: [
+          {
+            filePath: "src/components/LoginForm.tsx",
+            lineEnd: 40,
+            lineStart: 1,
+            snippetSummary: "Login form.",
+          },
+        ],
+        explanation: "Exact match.",
+        judgementDraft: "fulfilled",
+        matchedRequirementId: "req-1",
+        repairSuggestion: "No repair needed.",
+      }),
+      requirement: { id: "req-1", text: "Login form accepts email and password." },
+    });
+
+    expect(result.evidenceRefs[0]?.lineStart).toBe(1);
+    expect(result.evidenceRefs[0]?.lineEnd).toBe(40);
+    expect(result.evidenceRefs[0]?.snippetSummary).toBe("Login form.");
+  });
 });
 
 describe("draftSemanticJudgements", () => {

@@ -1,4 +1,5 @@
 import { buildSemanticJudgementPrompt } from "../prompts/index.js";
+import { normalizeEvidenceRefs } from "./evidence-ref-normalization.js";
 import { mapWithConcurrency } from "./limit.js";
 import type { LLMProvider } from "./provider.js";
 import type { RetryOptions } from "./retry.js";
@@ -7,6 +8,7 @@ import {
   type CandidateFileMetadata,
   type EvidenceSnippet,
   type SemanticClaim,
+  type SemanticEvidenceRef,
   type SemanticJudgementDraft,
   type SemanticRequirement,
   semanticJudgementDraftSchema,
@@ -52,9 +54,10 @@ export async function draftSemanticJudgement(
 
   const draft = semanticJudgementDraftSchema.parse(response.object);
 
-  assertEvidenceRefsExist(draft, input.evidenceSnippets);
+  const normalized = normalizeEvidenceRefs(draft.evidenceRefs, input.evidenceSnippets);
+  const canonicalRefs = collectCanonicalRefs(normalized);
 
-  return draft;
+  return { ...draft, evidenceRefs: canonicalRefs };
 }
 
 export async function draftSemanticJudgements(
@@ -72,22 +75,15 @@ export async function draftSemanticJudgements(
   );
 }
 
-function assertEvidenceRefsExist(
-  draft: SemanticJudgementDraft,
-  snippets: readonly EvidenceSnippet[],
-): void {
-  const snippetRefs = new Set(
-    snippets.map((snippet) => evidenceKey(snippet.filePath, snippet.lineStart, snippet.lineEnd)),
-  );
-
-  for (const evidenceRef of draft.evidenceRefs) {
-    const key = evidenceKey(evidenceRef.filePath, evidenceRef.lineStart, evidenceRef.lineEnd);
-    if (!snippetRefs.has(key)) {
-      throw new Error(`Evidence ref ${key} is not present in candidate evidence snippets.`);
+function collectCanonicalRefs(
+  normalized: ReturnType<typeof normalizeEvidenceRefs>,
+): SemanticEvidenceRef[] {
+  return normalized.refs.map((entry) => {
+    if (entry.kind === "unmatched") {
+      throw new Error(
+        `Evidence ref ${entry.reason} is not present in candidate evidence snippets.`,
+      );
     }
-  }
-}
-
-function evidenceKey(filePath: string, lineStart: number, lineEnd: number): string {
-  return `${filePath}:${lineStart}-${lineEnd}`;
+    return entry.ref;
+  });
 }

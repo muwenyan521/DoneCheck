@@ -407,6 +407,14 @@ GUI 复现使用 `apps/desktop` 当前 Electron shell 与 report-ui 展示链路
 
 真实 Electron 打包不是 Stage 7.3 重点；本阶段关注 Demo 展示链路和可复现 CLI/HTML 输出，不引入 Electron 打包依赖。
 
+### Provider 兼容矩阵
+
+不同运行路径（CLI / desktop GUI / packaged GUI）与 provider 模式（Deterministic mock / OpenAI-compatible）的兼容状态、推荐配置与已知问题已沉淀为独立文档：
+
+- 完整矩阵：[docs/provider-compatibility-matrix.md](docs/provider-compatibility-matrix.md)
+
+当前推荐 Demo 主链路：OpenAI-compatible provider + `OPENAI_STRUCTURED_OUTPUT_STRICT=false`，运行于 CLI / desktop GUI / Linux packaged GUI。Deterministic mock 仅用于离线结构验证，不代表真实 LLM 判断质量。Windows packaged GUI 仅产出制品，尚未验证 GUI 启动。
+
 ### 已知说明
 
 - 任何 OpenAI-compatible provider 均可作为初赛 Demo provider；通过 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 配置即可切换，不建议依赖单一 provider 品牌。

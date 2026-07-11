@@ -13,7 +13,7 @@
     "check:deps": "node scripts/check-dependency-boundaries.mjs",
     "check:licenses": "node scripts/check-licenses.mjs",
     "commitlint": "commitlint",
-    "lint": "biome check . && pnpm check:deps && pnpm check:licenses",
+    "lint": "git ls-files -z | xargs -0 -r biome check --no-errors-on-unmatched && pnpm check:deps && pnpm check:licenses",
     "prepare": "husky",
     "test": "vitest run scripts/*.test.mjs && turbo run test",
     "typecheck": "turbo run typecheck",

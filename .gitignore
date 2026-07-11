@@ -11,3 +11,4 @@ coverage/
 !.envrc
 *.log
 *.tsbuildinfo
+tmp/

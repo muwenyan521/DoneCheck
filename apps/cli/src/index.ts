@@ -3,6 +3,7 @@ import process from "node:process";
 import type { LLMProvider } from "@donecheck/core";
 import { analyze, runDoneCheckPipelineNode } from "@donecheck/core";
 import { decomposeRequirements } from "@donecheck/core/semantic";
+import { ProviderConfigError } from "@donecheck/provider-openai";
 import { parseArgs } from "./args.js";
 import { exitCodeForJudgementReport, exitCodeForResult, toolErrorExitCode } from "./exit-code.js";
 import { readInput } from "./input.js";
@@ -40,46 +41,53 @@ export async function runCli(runtime: CliRuntime): Promise<number> {
     return toolErrorExitCode;
   }
 
-  if (opts.rules || opts.html) {
-    const provider = runtime.provider ?? createProvider({ stderr: runtime.stderr });
-    try {
-      const decomposition = await decomposeRequirements({
-        claim: input.value.evidence,
-        provider,
-        requirement: input.value.requirement,
-      });
-      if (opts.confirmRequirements) {
-        const confirmed = await confirmRequirementDecomposition(runtime, decomposition);
-        if (!confirmed.ok) return toolErrorExitCode;
-      }
-      const result = await runDoneCheckPipelineNode({
-        claim: input.value.evidence,
-        claims: decomposition.claims,
-        provider,
-        requirement: input.value.requirement,
-        requirements: decomposition.requirements,
-        workspacePath: opts.workspace ?? process.cwd(),
-      });
-      if (opts.html) {
-        const html = formatHtml(result.report);
-        if (opts.output) {
-          await runtime.writeFile?.(opts.output, html);
-        } else {
-          runtime.stdout(html);
-        }
-      } else {
-        runtime.stdout(formatRulesJson(result.report));
-      }
-      return opts.rules ? 0 : exitCodeForJudgementReport(result.report, opts.partialOk);
-    } catch (error) {
-      runtime.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
-      return toolErrorExitCode;
-    }
+  if (opts.legacy) {
+    const result = analyze(input.value);
+    runtime.stdout(opts.json ? formatJsonResult(result) : formatHumanResult(result));
+    return exitCodeForResult(result.status, opts.partialOk);
   }
 
-  const result = analyze(input.value);
-  runtime.stdout(opts.json ? formatJsonResult(result) : formatHumanResult(result));
-  return exitCodeForResult(result.status, opts.partialOk);
+  try {
+    const provider =
+      runtime.provider ??
+      createProvider({
+        ...(opts.mock ? { mock: true } : {}),
+        stderr: runtime.stderr,
+      });
+    const decomposition = await decomposeRequirements({
+      claim: input.value.evidence,
+      provider,
+      requirement: input.value.requirement,
+    });
+    if (opts.confirmRequirements) {
+      const confirmed = await confirmRequirementDecomposition(runtime, decomposition);
+      if (!confirmed.ok) return toolErrorExitCode;
+    }
+    const result = await runDoneCheckPipelineNode({
+      claim: input.value.evidence,
+      claims: decomposition.claims,
+      provider,
+      requirement: input.value.requirement,
+      requirements: decomposition.requirements,
+      workspacePath: opts.workspace ?? process.cwd(),
+    });
+    if (opts.html) {
+      const html = formatHtml(result.report);
+      if (opts.output) {
+        await runtime.writeFile?.(opts.output, html);
+      } else {
+        runtime.stdout(html);
+      }
+    } else {
+      runtime.stdout(formatRulesJson(result.report));
+    }
+    return opts.rules ? 0 : exitCodeForJudgementReport(result.report, opts.partialOk);
+  } catch (error) {
+    if (!(error instanceof ProviderConfigError)) {
+      runtime.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    }
+    return toolErrorExitCode;
+  }
 }
 
 interface ConfirmResult {

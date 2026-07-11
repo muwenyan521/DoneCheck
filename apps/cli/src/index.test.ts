@@ -6,9 +6,15 @@ import { judgementReportSchema, parseDoneCheckResult } from "@donecheck/shared";
 import { describe, expect, it } from "vitest";
 import { runCli } from "./index.js";
 
-describe("runCli", () => {
-  it("runs core analysis and exits 0 for pass", async () => {
-    const result = await run(["--requirement", requirement, "--evidence", coveringEvidence]);
+describe("runCli --legacy", () => {
+  it("runs legacy analysis and exits 0 for pass", async () => {
+    const result = await run([
+      "--requirement",
+      requirement,
+      "--evidence",
+      coveringEvidence,
+      "--legacy",
+    ]);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -16,12 +22,13 @@ describe("runCli", () => {
     expect(result.stdout).toContain("Score: 100%");
   });
 
-  it("runs core analysis and exits 1 for partial by default", async () => {
+  it("runs legacy analysis and exits 1 for partial by default", async () => {
     const result = await run([
       "--requirement",
       requirement,
       "--evidence",
       "The implementation includes shared contracts only.",
+      "--legacy",
     ]);
 
     expect(result.exitCode).toBe(1);
@@ -29,12 +36,13 @@ describe("runCli", () => {
     expect(result.stdout).toContain("Status: partial");
   });
 
-  it("runs core analysis and exits 0 for partial with partial-ok", async () => {
+  it("runs legacy analysis and exits 0 for partial with partial-ok", async () => {
     const result = await run([
       "--requirement",
       requirement,
       "--evidence",
       "The implementation includes shared contracts only.",
+      "--legacy",
       "--partial-ok",
     ]);
 
@@ -43,12 +51,13 @@ describe("runCli", () => {
     expect(result.stdout).toContain("Status: partial");
   });
 
-  it("emits JSON that shared can parse in tests", async () => {
+  it("emits legacy JSON that shared can parse in tests", async () => {
     const result = await run([
       "--requirement",
       requirement,
       "--evidence",
       coveringEvidence,
+      "--legacy",
       "--json",
     ]);
 
@@ -58,7 +67,7 @@ describe("runCli", () => {
   });
 
   it("reads evidence from stdin when no explicit evidence is provided", async () => {
-    const result = await run(["--requirement", requirement], {
+    const result = await run(["--requirement", requirement, "--legacy"], {
       stdin: coveringEvidence,
       stdinIsTTY: false,
     });
@@ -76,7 +85,7 @@ describe("runCli", () => {
   });
 
   it("returns 2 for empty input", async () => {
-    const result = await run(["--requirement", requirement, "--evidence", ""]);
+    const result = await run(["--requirement", requirement, "--evidence", "", "--legacy"]);
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe("");
@@ -84,9 +93,10 @@ describe("runCli", () => {
   });
 
   it("returns 2 for missing files", async () => {
-    const result = await run(["--requirement", requirement, "--evidence-file", "missing.md"], {
-      fileError: new Error("ENOENT"),
-    });
+    const result = await run(
+      ["--requirement", requirement, "--evidence-file", "missing.md", "--legacy"],
+      { fileError: new Error("ENOENT") },
+    );
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe("");
@@ -94,11 +104,85 @@ describe("runCli", () => {
   });
 
   it("returns 2 instead of blocking on TTY stdin", async () => {
-    const result = await run(["--requirement", requirement], { stdinIsTTY: true });
+    const result = await run(["--requirement", requirement, "--legacy"], { stdinIsTTY: true });
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Missing evidence.");
+  });
+});
+
+describe("runCli default (real pipeline)", () => {
+  it("runs real pipeline by default and emits JudgementReport JSON", async () => {
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run(
+        [
+          "--requirement",
+          "Implement app module",
+          "--evidence",
+          "App module is implemented",
+          "--partial-ok",
+          "--workspace",
+          workspace,
+        ],
+        { provider: stubProvider },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      const parsed = JSON.parse(result.stdout);
+      expect(judgementReportSchema.parse(parsed)).toEqual(parsed);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("runs real pipeline with --mock flag when no API key is set", async () => {
+    const old = process.env.OPENAI_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var cleanup requires delete
+    delete process.env.OPENAI_API_KEY;
+    const workspace = createTempWorkspace();
+    try {
+      const result = await run([
+        "--requirement",
+        "Implement app module",
+        "--evidence",
+        "App module is implemented",
+        "--mock",
+        "--partial-ok",
+        "--workspace",
+        workspace,
+      ]);
+
+      expect(result.stderr).toContain("mock");
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.version).toBe("rules-v1");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      if (old !== undefined) process.env.OPENAI_API_KEY = old;
+    }
+  });
+
+  it("exits with error when no API key and no --mock flag", async () => {
+    const old = process.env.OPENAI_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var cleanup requires delete
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const result = await run([
+        "--requirement",
+        "Implement app module",
+        "--evidence",
+        "App module is implemented",
+        "--partial-ok",
+      ]);
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("OPENAI_API_KEY");
+    } finally {
+      if (old !== undefined) process.env.OPENAI_API_KEY = old;
+    }
   });
 });
 

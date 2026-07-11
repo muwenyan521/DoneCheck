@@ -6,7 +6,7 @@ import type { JudgementReport } from "@donecheck/shared";
 import { describe, expect, it } from "vitest";
 import { createSessionCredentialStore } from "./desktop-provider.js";
 import { createHistoryStore } from "./history-store.js";
-import { createDesktopIpcHandlers, injectDesktopExportStyles } from "./ipc-handlers.js";
+import { createDesktopIpcHandlers } from "./ipc-handlers.js";
 import { createSettingsStore } from "./settings-store.js";
 
 const externalResourceMatchers = [
@@ -128,7 +128,7 @@ describe("desktop IPC handlers", () => {
     expect(html.data.html).toMatch(/^<!doctype html><html lang="zh-CN">/u);
     expect(html.data.html).toContain("DoneCheck");
     expect(html.data.html).toContain("判定列表");
-    expect(html.data.html).toContain('<style data-donecheck-desktop-export="true">');
+    expect(html.data.html).toContain('<style data-donecheck-report-styles="true">');
     for (const matcher of externalResourceMatchers) {
       expect(html.data.html).not.toMatch(matcher);
     }
@@ -189,21 +189,6 @@ describe("desktop IPC handlers", () => {
     }
   });
 
-  it("injects desktop export styles idempotently and tolerates head casing", () => {
-    const html =
-      "<!doctype html><html><HEAD  ><title>Report</title></HEAD><body>DoneCheck</body></html>";
-
-    const styled = injectDesktopExportStyles(html);
-    const styledAgain = injectDesktopExportStyles(styled);
-
-    expect(styled).toContain('<style data-donecheck-desktop-export="true">');
-    expect(styled).toContain("</HEAD>");
-    expect(styledAgain.match(/data-donecheck-desktop-export/g)).toHaveLength(1);
-    expect(injectDesktopExportStyles("<html><body>DoneCheck</body></html>")).toBe(
-      "<html><body>DoneCheck</body></html>",
-    );
-  });
-
   it("renderHtml honors locale and template options", async () => {
     const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
     const analyzed = await handlers.analyze({
@@ -230,11 +215,11 @@ describe("desktop IPC handlers", () => {
     if (!en.ok) throw new Error(en.error.message);
     if (!zh.ok) throw new Error(zh.error.message);
     expect(en.data.html).toContain('<html lang="en">');
-    expect(en.data.html).toContain('<style data-donecheck-desktop-export="true">');
+    expect(en.data.html).toContain('<style data-donecheck-report-styles="true">');
     expect(en.data.html).toContain("TODO Report");
     expect(en.data.html).toContain("Judgements");
     expect(zh.data.html).toContain('<html lang="zh-CN">');
-    expect(zh.data.html).toContain('<style data-donecheck-desktop-export="true">');
+    expect(zh.data.html).toContain('<style data-donecheck-report-styles="true">');
     expect(zh.data.html).toContain("前端报告");
     expect(zh.data.html).toContain("判定列表");
   });

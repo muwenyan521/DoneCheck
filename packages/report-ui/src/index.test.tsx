@@ -171,6 +171,14 @@ const genericTemplate: ReportTemplate = {
 const todoTemplate: ReportTemplate = {
   ...genericTemplate,
   descriptionKey: "template.todo.description",
+  highlights: {
+    reasonCodes: [
+      "missing-semantic-draft",
+      "weak-or-unstable-evidence",
+      "semantic-partial-with-supporting-evidence",
+    ],
+    statuses: ["insufficient-evidence", "partial", "unfulfilled"],
+  },
   id: "todo",
   layout: {
     defaultCollapsedSections: ["debug"],
@@ -183,6 +191,10 @@ const todoTemplate: ReportTemplate = {
 const frontendTemplate: ReportTemplate = {
   ...genericTemplate,
   descriptionKey: "template.frontend.description",
+  highlights: {
+    reasonCodes: ["fake-implementation-signal-detected", "extra-scope-detected"],
+    statuses: ["suspicious-fake-implementation", "extra-scope"],
+  },
   id: "frontend",
   layout: {
     defaultCollapsedSections: [],
@@ -208,7 +220,7 @@ describe("JudgementReportPage", () => {
     expect(markup).toContain("承诺覆盖率");
     expect(markup).toContain("25%");
     expect(markup).toContain("范围偏离");
-    expect(markup).toContain("medium");
+    expect(markup).toContain("17% · 中");
     expect(markup).toContain("分母: 2");
     expect(markup).toContain("证据不足剔除: 1");
     expect(markup).toContain("rules-v1");
@@ -223,7 +235,7 @@ describe("JudgementReportPage", () => {
     expect(markup).toContain("假实现信号");
     expect(markup).toContain("静态召回信号");
     expect(markup).toContain("类型");
-    expect(markup).toContain("requirement");
+    expect(markup).toContain("需求");
   });
 
   it("switches zh-CN and en user-visible copy for the same report", () => {
@@ -284,6 +296,20 @@ describe("JudgementReportPage", () => {
     expect(markup).toContain("template.missing.name");
   });
 
+  it("localizes internal enum values (kind, confidenceLevel, evidenceStrength, scopeDriftLevel) instead of exposing raw English keys", () => {
+    const zh = html(genericTemplate, "zh-CN");
+    const en = html(genericTemplate, "en");
+
+    expect(zh).toContain("需求");
+    expect(zh).toContain("承诺");
+    expect(zh).toContain("高");
+    expect(zh).toContain("强");
+    expect(en).toContain("Requirement");
+    expect(en).toContain("Claim");
+    expect(en).toContain("High");
+    expect(en).toContain("Strong");
+  });
+
   it("uses template configuration to change section order and highlighted items without mutating report data", () => {
     const before = JSON.stringify(report);
     const generic = html(genericTemplate, "en");
@@ -295,6 +321,31 @@ describe("JudgementReportPage", () => {
     expect(frontend.indexOf("Debug Details")).toBeLessThan(frontend.indexOf("Judgements"));
     expect(generic).toContain('data-highlighted="true"');
     expect(JSON.stringify(report)).toBe(before);
+  });
+
+  it("drives RiskHighlightsSection from template.highlights instead of a fixed status list", () => {
+    const generic = html(genericTemplate, "en");
+    const todo = html(todoTemplate, "en");
+
+    const riskSection = (markup: string) => {
+      const start = markup.indexOf("Risk Highlights");
+      const judgementsIdx = markup.indexOf("Judgements", start + 1);
+      const debugIdx = markup.indexOf("Debug Details", start + 1);
+      const candidates = [judgementsIdx, debugIdx].filter((idx) => idx !== -1);
+      const end = candidates.length > 0 ? Math.min(...candidates) : markup.length;
+      return markup.slice(start, end);
+    };
+
+    const genericRisk = riskSection(generic);
+    const todoRisk = riskSection(todo);
+
+    expect(genericRisk).toContain("Suspicious Fake Implementation");
+    expect(genericRisk).toContain("Extra Scope");
+    expect(genericRisk).not.toContain("Partial");
+
+    expect(todoRisk).toContain("Partial");
+    expect(todoRisk).toContain("Unfulfilled");
+    expect(todoRisk).not.toContain("Suspicious Fake Implementation");
   });
 
   it("keeps ReportSummary as a compatibility wrapper for legacy DoneCheckResult", () => {

@@ -70,6 +70,44 @@ describe("pipeline item matching", () => {
     );
   });
 
+  it("does not drop signals when file path has no token overlap with requirement text (cross-language)", () => {
+    const requirements = [
+      { id: "REQ-1", text: "支持新增任务" },
+      { id: "REQ-2", text: "支持删除任务" },
+      { id: "REQ-3", text: "支持标记完成" },
+    ];
+    const claims = [
+      { id: "CLAIM-1", text: "已实现新增任务功能" },
+      { id: "CLAIM-2", text: "已实现删除任务功能" },
+    ];
+    const matches = matchClaimsToRequirements(requirements, claims);
+    const targeted = targetSignals({
+      candidateFiles: ["src/TodoApp.tsx"],
+      claims,
+      matches,
+      requirements,
+      staticSignals: [
+        {
+          filePath: "src/TodoApp.tsx",
+          keyword: "localStorage",
+          strength: "strong" as const,
+        },
+      ],
+      fakeImplementationSignals: [
+        {
+          filePath: "src/TodoApp.tsx",
+          lineEnd: 15,
+          lineStart: 15,
+          pattern: "alert-only",
+          strength: "strong" as const,
+        },
+      ],
+    });
+
+    expect(targeted.staticSignals.length).toBeGreaterThan(0);
+    expect(targeted.fakeImplementationSignals.length).toBeGreaterThan(0);
+  });
+
   it("builds extra-scope candidates from unmatched additive claims", () => {
     const requirements = [
       { id: "REQ-1", text: "Implement todo tracking without billing controls." },

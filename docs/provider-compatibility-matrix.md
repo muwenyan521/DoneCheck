@@ -15,7 +15,7 @@
 
 ### 当前 mock 主链路
 
-- **Provider 类型**：Deterministic mock（CLI 无 `OPENAI_API_KEY` 时自动回退；GUI 显式选择“Deterministic mock”）
+- **Provider 类型**：Deterministic mock（CLI 须传 `--mock` 标志显式启用；GUI 显式选择“Deterministic mock”）
 - **用途**：仅用于结构验证（需求拆解、文件选择、rules JSON 输出、HTML 渲染、退出码），不代表真实 LLM 判断质量。
 - **依据**：mock CLI 实跑 exit 0、uniqueIds(12) === judgementCount(12)、badRefs = 0、REQ-1..5 + CLAIM-1..6 + extra-scope 齐全。
 
@@ -37,7 +37,7 @@
 
 | Path | Provider/mode | strict | Status | Validated by | Known caveats | Recommended use |
 | --- | --- | --- | --- | --- | --- | --- |
-| CLI | Deterministic mock | n/a | ✅ Recommended | Stage 8.9 mock CLI 实跑 | 只证明结构路径，不代表真实判断质量 | 离线结构验证、CI、退出码验收 |
+| CLI | Deterministic mock | n/a | ✅ Recommended | Stage 8.9 mock CLI 实跑 | 只证明结构路径，不代表真实判断质量；须传 `--mock` 标志，无 key 且未传 `--mock` 时 exit 2 | 离线结构验证、CI、退出码验收 |
 | CLI | OpenAI-compatible | false | ✅ Recommended | Stage 8.9 real CLI 实跑（本地 OpenAI-compatible 端点，`OPENAI_STRUCTURED_OUTPUT_STRICT=false`） | 端点需兼容 `chat.completions.parse`；若端点返回 `response_format unavailable` 会触发 fallback | 真实 Demo 主链路、可复现 LLM 判断 |
 | CLI | OpenAI-compatible | true | ⚠️ Supported with caveats | Stage 8.9 real CLI 实跑（本次通过） | 部分端点会触发 502/504/`.optional()` warning/`response_format unavailable`；structured-output-compat 层与 fallback repair 是缓解措施，不是保证 | 仅在确认端点完整支持 strict JSON schema 时使用 |
 | desktop GUI | Deterministic mock | n/a | ✅ Recommended | `desktop-provider.test.ts`、GUI 设置页 | mock 只在显式选择 `providerMode: "mock"` 时使用，不再 silent fallback | 离线 GUI 结构验证、设置页演示 |
@@ -60,7 +60,7 @@
 
 | 目标 | 推荐 provider/mode | 推荐 strict | 推荐 path |
 | --- | --- | --- | --- |
-| 只验证结构、退出码、HTML 渲染 | Deterministic mock | n/a | CLI（无 `OPENAI_API_KEY`）或 GUI（显式 mock） |
+| 只验证结构、退出码、HTML 渲染 | Deterministic mock | n/a | CLI（`--mock` 标志）或 GUI（显式 mock） |
 | 真正展示产品 LLM 判断价值 | OpenAI-compatible | `false` | CLI 或 GUI |
 | 本地 GUI 演示 | OpenAI-compatible | `false` | desktop GUI，设置页配置 Base URL / Model / session key |
 | 打包制品演示 | OpenAI-compatible | `false` | packaged GUI（Linux 已验证；Windows 仅制品未验证 GUI） |
@@ -68,7 +68,7 @@
 
 选择原则：
 
-1. **默认用 mock 验结构**：无网络、无 key、CI 场景下用 deterministic mock 跑完整管线。
+1. **默认用 mock 验结构**：无网络、无 key、CI 场景下用 deterministic mock 跑完整管线（CLI 须传 `--mock` 标志，无 key 且未传 `--mock` 时会以 exit 2 报错）。
 2. **真实判断用 strict=false**：strict=false 是当前最稳的真实 LLM 路径，规避 strict 模式端点兼容风险。
 3. **GUI 走设置页**：通过 Settings > Provider 配置 providerMode / Base URL / Model / session key / strict，设置在下次 Analyze 时生效。
 4. **打包演示用已验证配置**：packaged GUI smoke 只验证壳与原生存储，真实分析仍依赖运行时 provider 配置；Windows 打包制品未经 GUI smoke 验证，不声称支持。
@@ -86,12 +86,13 @@
 | EvidenceRef span 精度问题（整文件 span 超出 snippet window） | MiniMax 等 fallback 路径 | fallback instruction 明确要求“use only exact filePath, lineStart, and lineEnd ranges present in the provided evidence snippets”；Stage 8.8 已实现 `evidence-ref-normalization`：近邻匹配（lineTolerance=1、overlapRatio≥0.8）的模型引用被规范化为真实候选 snippet，超出容差或歧义匹配的引用仍被拒绝 | 不阻塞 Demo 结构；近邻行号漂移已由 8.8 规范化兜底，整文件 span 仍依赖 fallback instruction |
 | `OPENAI_STRUCTURED_OUTPUT_STRICT must be one of ...` | env 值非法 | `resolveStructuredOutputStrict` 抛 `ProviderConfigError`；`provider-error-ux` 分类为 `strict-output` | 是配置错误，修正 env 即可 |
 | `OpenAI-compatible mode requires an API key` | GUI openai-compatible 模式缺 key | `createDesktopProviderFactory` 显式抛错，**不** silent fallback 到 mock；`provider-error-ux` 分类为 `missing-key` | 是配置错误，输入 session key 或切 mock |
+| `OPENAI_API_KEY is not set. Use --mock ...` | CLI 无 key 且未传 `--mock` | `createProvider()` 显式抛 `ProviderConfigError`，**不** silent fallback 到 mock；exit 2 | 是配置错误，传 `--mock` 或设置 `OPENAI_API_KEY` |
 | packaged GUI smoke `ready file missing` | Linux packaged smoke（历史 CI run 曾出现） | 已通过 `--no-sandbox`（commit `a463827`）修复，最新 CI run `29025568215` PASS | 否（已修复） |
 | Windows packaged GUI 未验证 | Windows | CI 仅打包并断言制品存在，未跑 GUI smoke | 不阻塞 Linux Demo；Windows 支持状态保持 ⏸️ |
 
 ## 5. 本项目对 provider 的承诺边界
 
-1. **DoneCheck 当前只正式实现了一套 OpenAI-compatible provider 接口路径**，位于 `packages/provider-openai`，通过 `createProvider()` 工厂暴露。CLI 与 desktop IPC 都通过它获取 LLM provider。
+1. **DoneCheck 当前只正式实现了一套 OpenAI-compatible provider 接口路径**，位于 `packages/provider-openai`，通过 `createProvider()` 工厂暴露。CLI 与 desktop IPC 都通过它获取 LLM provider。无 key 时 `createProvider()` 显式抛 `ProviderConfigError`，**不** silent fallback 到 mock；CLI 须传 `--mock` 标志以使用 deterministic mock。
 2. **具体 provider 品牌不是产品内建功能**，而是运行时接入示例。任何 OpenAI-compatible provider 均可通过 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` 切换，不建议依赖单一 provider 品牌。
 3. **Provider 品牌不固化进 GUI / CLI 产品命名**：GUI 设置页文案、CLI 文案、代码路径均使用 provider-agnostic 表述（“OpenAI-compatible”、“Deterministic mock”）。
 4. **mock 只保证结构路径，不保证真实判断质量**：deterministic mock 的 `judgementDraft` 固定为 `partial`，`evidenceRefs` 来自 prompt payload 的静态抽取，不代表真实 LLM 语义判断。
@@ -103,7 +104,7 @@
 
 本文档的事实基于以下可复现命令（详见 Stage 8.9 验收记录）：
 
-- mock CLI：`env -u OPENAI_API_KEY -u OPENAI_BASE_URL -u OPENAI_MODEL node apps/cli/dist/index.js --rules ...`（exit 0、uniqueIds === judgementCount、badRefs = 0）
+- mock CLI：`env -u OPENAI_API_KEY -u OPENAI_BASE_URL -u OPENAI_MODEL node apps/cli/dist/index.js --mock --rules ...`（exit 0、uniqueIds === judgementCount、badRefs = 0）
 - real CLI strict=false：`OPENAI_STRUCTURED_OUTPUT_STRICT=false node apps/cli/dist/index.js --rules ...`（exit 0、real LLM 合理分布）
 - real CLI strict=true：同上但 `OPENAI_STRUCTURED_OUTPUT_STRICT=true`（本次通过，但历史上有端点兼容风险）
 - GUI parity：`nix develop -c pnpm --filter @donecheck/desktop test`（`desktop-provider.test.ts` 验证 undici fetch 注入、session key 优先、无 silent mock fallback）

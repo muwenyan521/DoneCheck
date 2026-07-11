@@ -22,7 +22,7 @@ export interface DesktopSettings {
 export type DesktopSettingsPatch = Partial<DesktopSettings>;
 
 export const defaultDesktopSettings: DesktopSettings = {
-  autoSaveHistory: true,
+  autoSaveHistory: false,
   confirmRequirementDecomposition: false,
   defaultWorkspaceDir: null,
   ignore: [],

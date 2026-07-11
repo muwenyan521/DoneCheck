@@ -45,8 +45,13 @@ export interface JudgementReportPageProps {
 }
 
 export interface HtmlReportDocumentInput extends JudgementReportPageProps {
+  readonly includeStyles?: boolean;
   readonly title?: string;
 }
+
+export const defaultReportStyles = `<style data-donecheck-report-styles="true">
+:root{color:#172033;background:#eef3f8;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;padding:32px;background:linear-gradient(135deg,#eef3f8 0%,#f8fafc 48%,#e8f0ff 100%)}article[data-locale]{max-width:1120px;margin:0 auto;border:1px solid #d8e2ed;border-radius:28px;background:rgba(255,255,255,.96);box-shadow:0 24px 80px rgba(23,32,51,.12);padding:32px}header{border-bottom:1px solid #d8e2ed;margin-bottom:24px;padding-bottom:20px}h1{font-size:32px;letter-spacing:-.03em;margin:0 0 8px}h2{font-size:20px;margin:24px 0 12px}h3{font-size:16px;margin:0 0 8px}p,dd,li{line-height:1.6}section{margin:24px 0}dl{display:grid;grid-template-columns:minmax(160px,max-content) 1fr;gap:10px 18px;margin:0}dt{color:#526171;font-weight:800}dd{margin:0}ul{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;list-style:none;padding:0}li{border:1px solid #d8e2ed;border-radius:14px;background:#f8fafc;padding:10px 12px}article article{border:1px solid #d8e2ed;border-left:6px solid #1f6feb;border-radius:18px;background:#fff;margin:14px 0;padding:16px}article article[data-highlighted="true"]{border-left-color:#d97706;background:#fffbeb}article article[data-kind="extra-scope"]{border-left-color:#7c3aed}pre{white-space:pre-wrap;overflow:auto;border-radius:14px;background:#0f172a;color:#dbeafe;padding:14px}details{border:1px solid #d8e2ed;border-radius:16px;background:#f8fafc;margin:12px 0;padding:12px}summary{cursor:pointer;font-weight:800}@media (max-width:720px){body{padding:16px}article[data-locale]{padding:20px;border-radius:20px}dl{grid-template-columns:1fr}ul{grid-template-columns:1fr}}
+</style>`;
 
 const messages = {
   en: {
@@ -100,6 +105,27 @@ const messages = {
       partial: "Partial",
       "suspicious-fake-implementation": "Suspicious Fake Implementation",
       unfulfilled: "Unfulfilled",
+    },
+    kind: {
+      claim: "Claim",
+      "extra-scope": "Extra Scope",
+      requirement: "Requirement",
+    },
+    confidenceLevel: {
+      high: "High",
+      low: "Low",
+      medium: "Medium",
+    },
+    evidenceStrength: {
+      medium: "Medium",
+      none: "None",
+      strong: "Strong",
+      weak: "Weak",
+    },
+    scopeDriftLevel: {
+      high: "High",
+      low: "Low",
+      medium: "Medium",
     },
     template: {
       frontend: {
@@ -168,6 +194,27 @@ const messages = {
       "suspicious-fake-implementation": "疑似假实现",
       unfulfilled: "未兑现",
     },
+    kind: {
+      claim: "承诺",
+      "extra-scope": "需求外范围",
+      requirement: "需求",
+    },
+    confidenceLevel: {
+      high: "高",
+      low: "低",
+      medium: "中",
+    },
+    evidenceStrength: {
+      medium: "中",
+      none: "无",
+      strong: "强",
+      weak: "弱",
+    },
+    scopeDriftLevel: {
+      high: "高",
+      low: "低",
+      medium: "中",
+    },
     template: {
       frontend: {
         description: "优先突出前端 UI-only 与假实现风险。",
@@ -217,6 +264,15 @@ export function translateReasonCode(reasonCode: string, locale: Locale): string 
   return value;
 }
 
+export function translateEnum(
+  category: "kind" | "confidenceLevel" | "evidenceStrength" | "scopeDriftLevel",
+  value: string,
+  locale: Locale,
+): string {
+  const translated = translate(`${category}.${value}`, locale);
+  return translated === `${category}.${value}` ? value : translated;
+}
+
 export function JudgementReportPage({ locale, report, template }: JudgementReportPageProps) {
   return (
     <article data-locale={locale} data-template-id={template.id}>
@@ -237,11 +293,13 @@ export function createHtmlReportDocument({
   report,
   template,
   title,
+  includeStyles,
 }: HtmlReportDocumentInput): string {
   const markup = renderToStaticMarkup(
     <JudgementReportPage locale={locale} report={report} template={template} />,
   );
-  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>${escapeHtml(title ?? translate("report.title", locale))}</title></head><body>${markup}</body></html>`;
+  const styles = includeStyles === true ? defaultReportStyles : "";
+  return `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><title>${escapeHtml(title ?? translate("report.title", locale))}</title>${styles}</head><body>${markup}</body></html>`;
 }
 
 function renderSection(section: ReportTemplateSection, props: JudgementReportPageProps) {
@@ -267,7 +325,7 @@ function OverviewSection({ locale, report }: JudgementReportPageProps) {
         <dt>{translate("report.claimCoverage", locale)}</dt>
         <dd>{formatCoverage(report.claimCoverage, locale)}</dd>
         <dt>{translate("report.scopeDrift", locale)}</dt>
-        <dd>{`${formatPercent(report.scopeDrift.score)} · ${report.scopeDrift.level}`}</dd>
+        <dd>{`${formatPercent(report.scopeDrift.score)} · ${translateEnum("scopeDriftLevel", report.scopeDrift.level, locale)}`}</dd>
         <dt>{translate("common.rulesVersion", locale)}</dt>
         <dd>{report.version}</dd>
         <dt>{translate("common.generatedAt", locale)}</dt>
@@ -289,10 +347,12 @@ function OverviewSection({ locale, report }: JudgementReportPageProps) {
 }
 
 function RiskHighlightsSection({ locale, report, template }: JudgementReportPageProps) {
-  const risks = report.judgements.filter((judgement) =>
-    ["suspicious-fake-implementation", "extra-scope", "insufficient-evidence"].includes(
-      judgement.finalStatus,
-    ),
+  const highlightStatuses = new Set(template.highlights.statuses);
+  const highlightReasonCodes = new Set(template.highlights.reasonCodes);
+  const risks = report.judgements.filter(
+    (judgement) =>
+      highlightStatuses.has(judgement.finalStatus) ||
+      highlightReasonCodes.has(judgement.reasonCode),
   );
   return (
     <section aria-label={translate("report.riskHighlights", locale)}>
@@ -339,7 +399,7 @@ function DebugSection({ locale, report, template }: JudgementReportPageProps) {
           <h3>{translate("common.signals", locale)}</h3>
           <dl>
             <dt>{translate("common.evidenceStrength", locale)}</dt>
-            <dd>{judgement.signals.evidenceStrength}</dd>
+            <dd>{translateEnum("evidenceStrength", judgement.signals.evidenceStrength, locale)}</dd>
             <dt>{translate("common.fakeImplementationSignals", locale)}</dt>
             <dd>
               <pre>{JSON.stringify(judgement.signals.fakeImplementationSignals, null, 2)}</pre>
@@ -374,13 +434,13 @@ function JudgementCard({
       <p>{judgement.explanation}</p>
       <dl>
         <dt>{translate("common.kind", locale)}</dt>
-        <dd>{judgement.kind}</dd>
+        <dd>{translateEnum("kind", judgement.kind, locale)}</dd>
         <dt>{translate("common.sourceId", locale)}</dt>
         <dd>{judgement.sourceId}</dd>
         <dt>{translate("common.confidence", locale)}</dt>
         <dd>{formatPercent(judgement.confidence)}</dd>
         <dt>{translate("common.confidenceLevel", locale)}</dt>
-        <dd>{judgement.confidenceLevel}</dd>
+        <dd>{translateEnum("confidenceLevel", judgement.confidenceLevel, locale)}</dd>
         <dt>{translate("common.evidence", locale)}</dt>
         <dd>
           {judgement.evidenceRefs.length === 0

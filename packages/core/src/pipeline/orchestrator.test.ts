@@ -251,7 +251,7 @@ describe("orchestrateAnalysis", () => {
 
     expect(result.evidenceSnippets).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ filePath: "src/login.ts", lineStart: 8, lineEnd: 12 }),
+        expect.objectContaining({ filePath: "src/login.ts", lineStart: 1, lineEnd: 20 }),
       ]),
     );
     expect(result.report.judgements[0]?.evidenceRefs[0]?.filePath).toBe("src/login.ts");
@@ -484,5 +484,220 @@ describe("orchestrateAnalysis", () => {
       result.report.judgements.filter((j) => j.id.startsWith("requirement:")).length,
     );
     expect(semanticCalls.length).toBeLessThan(10);
+  });
+
+  it("overrides garbage matchedClaimId from LLM with pre-matched claim id", async () => {
+    const provider: LLMProvider = {
+      async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+        if (input.schemaName === "FileSelectionModelOutput") {
+          return {
+            object: input.schema.parse({ candidateFiles: ["src/app.tsx"] }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        const payload = JSON.parse(input.prompt.user) as {
+          evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+          requirement: { id: string };
+        };
+        const ref = payload.evidenceSnippets[0];
+        if (ref === undefined) throw new Error("missing evidence");
+        return {
+          object: input.schema.parse({
+            confidence: 0.9,
+            evidenceRefs: [
+              {
+                filePath: ref.filePath,
+                lineEnd: ref.lineEnd,
+                lineStart: ref.lineStart,
+                snippetSummary: "app",
+              },
+            ],
+            explanation: "implemented",
+            judgementDraft: "fulfilled",
+            matchedClaimId: "N/A",
+            matchedRequirementId: payload.requirement.id,
+            repairSuggestion: "none",
+          }) as T,
+          metadata: { provider: "mock", model: "mock", retries: 0 },
+          usage: {},
+        };
+      },
+    };
+
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: 支持新增任务\nREQ-2: 支持删除任务",
+      claim: "CLAIM-1: 已实现新增\nCLAIM-2: 已实现删除",
+      requirements: [
+        { id: "REQ-1", text: "支持新增任务" },
+        { id: "REQ-2", text: "支持删除任务" },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "已实现新增" },
+        { id: "CLAIM-2", text: "已实现删除" },
+      ],
+      files: [
+        {
+          relativePath: "src/app.tsx",
+          content: Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n"),
+        },
+      ],
+      provider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const claim1 = result.report.judgements.find((j) => j.id === "claim:CLAIM-1");
+    const claim2 = result.report.judgements.find((j) => j.id === "claim:CLAIM-2");
+    expect(claim1?.finalStatus).not.toBe("insufficient-evidence");
+    expect(claim2?.finalStatus).not.toBe("insufficient-evidence");
+  });
+
+  it("degrades to insufficient-evidence when a single requirement judgement fails, instead of crashing the report", async () => {
+    const provider: LLMProvider = {
+      async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+        if (input.schemaName === "FileSelectionModelOutput") {
+          return {
+            object: input.schema.parse({
+              candidateFiles: ["src/login.ts", "src/export.ts"],
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        if (input.schemaName === "SemanticJudgementDraft") {
+          const payload = JSON.parse(input.prompt.user) as {
+            evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+            requirement: { id: string };
+          };
+          if (payload.requirement.id === "REQ-3") {
+            throw new Error("simulated provider 429 rate limit");
+          }
+          const ref = payload.evidenceSnippets[0];
+          if (ref === undefined) throw new Error("missing evidence");
+          return {
+            object: input.schema.parse({
+              confidence: 0.9,
+              evidenceRefs: [
+                {
+                  filePath: ref.filePath,
+                  lineEnd: ref.lineEnd,
+                  lineStart: ref.lineStart,
+                  snippetSummary: "login evidence",
+                },
+              ],
+              explanation: "login is implemented",
+              judgementDraft: "fulfilled",
+              matchedRequirementId: payload.requirement.id,
+              repairSuggestion: "none",
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        throw new Error(`unexpected schema ${input.schemaName}`);
+      },
+    };
+
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement login.\nREQ-3: Implement CSV export.",
+      claim: "CLAIM-1: Login is implemented.\nCLAIM-3: CSV export is implemented.",
+      requirements: [
+        { id: "REQ-1", text: "Implement login." },
+        { id: "REQ-3", text: "Implement CSV export." },
+      ],
+      claims: [
+        { id: "CLAIM-1", text: "Login is implemented." },
+        { id: "CLAIM-3", text: "CSV export is implemented." },
+      ],
+      files: [
+        {
+          relativePath: "src/login.ts",
+          content: "export function login() { localStorage.setItem('x','1'); }",
+        },
+        {
+          relativePath: "src/export.ts",
+          content: "export function exportCsv() { return 'csv'; }",
+        },
+      ],
+      provider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const login = result.report.judgements.find(
+      (judgement) => judgement.id === "requirement:REQ-1",
+    );
+    const csv = result.report.judgements.find((judgement) => judgement.id === "requirement:REQ-3");
+    expect(login?.finalStatus).not.toBe("insufficient-evidence");
+    expect(csv?.finalStatus).toBe("insufficient-evidence");
+    expect(csv?.reasonCode).toBe("missing-semantic-draft");
+    expect(result.report.warnings.some((w) => w.includes("REQ-3"))).toBe(true);
+  });
+
+  it("consumes possibleExtraScope from semantic drafts as code-evidenced extra-scope candidates", async () => {
+    const provider: LLMProvider = {
+      async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+        if (input.schemaName === "FileSelectionModelOutput") {
+          return {
+            object: input.schema.parse({
+              candidateFiles: ["src/app.ts"],
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        if (input.schemaName === "SemanticJudgementDraft") {
+          const payload = JSON.parse(input.prompt.user) as {
+            evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+            requirement: { id: string };
+          };
+          const ref = payload.evidenceSnippets[0];
+          if (ref === undefined) throw new Error("missing evidence");
+          return {
+            object: input.schema.parse({
+              confidence: 0.9,
+              evidenceRefs: [
+                {
+                  filePath: ref.filePath,
+                  lineEnd: ref.lineEnd,
+                  lineStart: ref.lineStart,
+                  snippetSummary: "app with extra billing",
+                },
+              ],
+              explanation: "app is implemented but also contains extra billing code",
+              judgementDraft: "fulfilled",
+              matchedRequirementId: payload.requirement.id,
+              possibleExtraScope: [
+                "Adds an unrelated billing dashboard not requested in requirements",
+              ],
+              repairSuggestion: "Remove the billing dashboard to stay within scope",
+            }) as T,
+            metadata: { provider: "mock", model: "mock", retries: 0 },
+            usage: {},
+          };
+        }
+        throw new Error(`unexpected schema ${input.schemaName}`);
+      },
+    };
+
+    const result = await orchestrateAnalysis({
+      requirement: "REQ-1: Implement todo tracking.",
+      claim: "CLAIM-1: Todo tracking is implemented.",
+      requirements: [{ id: "REQ-1", text: "Implement todo tracking." }],
+      claims: [{ id: "CLAIM-1", text: "Todo tracking is implemented." }],
+      files: [
+        {
+          relativePath: "src/app.ts",
+          content: "export const app = () => localStorage.getItem('todos');",
+        },
+      ],
+      provider,
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const extraScope = result.report.judgements.find((j) => j.id.includes("extra-code-"));
+    expect(extraScope).toBeDefined();
+    expect(extraScope?.finalStatus).toBe("extra-scope");
+    expect(extraScope?.reasonCode).toBe("extra-scope-detected");
+    expect(result.report.summaryStats["extra-scope"]).toBeGreaterThanOrEqual(1);
   });
 });

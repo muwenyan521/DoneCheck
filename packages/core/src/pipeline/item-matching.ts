@@ -87,6 +87,7 @@ export function matchClaimsToRequirements(
 }
 
 export function targetSignals(input: {
+  readonly candidateFiles?: readonly string[];
   readonly claims: readonly SemanticClaim[];
   readonly fakeImplementationSignals: readonly FakeImplementationSignal[];
   readonly matches: readonly ClaimMatch[];
@@ -97,17 +98,30 @@ export function targetSignals(input: {
   readonly staticSignals: TargetedStaticSignal[];
 } {
   if (input.requirements.length <= 1) {
+    const candidateFiles = input.candidateFiles;
+    if (candidateFiles === undefined) {
+      return {
+        fakeImplementationSignals: input.fakeImplementationSignals.map((signal) => ({ ...signal })),
+        staticSignals: input.staticSignals.map((signal) => ({ ...signal })),
+      };
+    }
+    const candidateSet = new Set(candidateFiles);
     return {
-      fakeImplementationSignals: input.fakeImplementationSignals.map((signal) => ({ ...signal })),
-      staticSignals: input.staticSignals.map((signal) => ({ ...signal })),
+      fakeImplementationSignals: input.fakeImplementationSignals
+        .filter((signal) => candidateSet.has(signal.filePath))
+        .map((signal) => ({ ...signal })),
+      staticSignals: input.staticSignals
+        .filter((signal) => candidateSet.has(signal.filePath))
+        .map((signal) => ({ ...signal })),
     };
   }
+  const candidateFiles = input.candidateFiles;
   return {
     fakeImplementationSignals: input.fakeImplementationSignals.flatMap((signal) =>
-      targetOneSignal(signal, input.requirements, input.claims, input.matches),
+      targetOneSignal(signal, input.requirements, input.claims, input.matches, candidateFiles),
     ),
     staticSignals: input.staticSignals.flatMap((signal) =>
-      targetOneSignal(signal, input.requirements, input.claims, input.matches),
+      targetOneSignal(signal, input.requirements, input.claims, input.matches, candidateFiles),
     ),
   };
 }
@@ -146,6 +160,7 @@ function targetOneSignal<T extends FakeImplementationSignal | TargetedStaticSign
   requirements: readonly SemanticRequirement[],
   claims: readonly SemanticClaim[],
   matches: readonly ClaimMatch[],
+  candidateFiles?: readonly string[],
 ): T[] {
   const candidates = [
     ...requirements.map((requirement) => ({ kind: "requirement" as const, item: requirement })),
@@ -159,7 +174,12 @@ function targetOneSignal<T extends FakeImplementationSignal | TargetedStaticSign
     .sort((left, right) => right.score - left.score);
 
   const best = candidates[0];
-  if (best === undefined) return [];
+  if (best === undefined) {
+    if (candidateFiles?.includes(signal.filePath)) {
+      return [{ ...signal, targetKind: undefined, targetId: undefined } as T];
+    }
+    return [];
+  }
   const paired = pairedTargets(best.kind, best.item.id, matches);
   return [
     { ...signal, targetKind: best.kind, targetId: best.item.id } as T,
@@ -220,13 +240,23 @@ function conflictsWithNegativeRequirement(
 }
 
 function tokens(text: string): Set<string> {
-  return new Set(
-    (text.match(/[\p{L}\p{N}]+/gu) ?? [])
-      .flatMap(splitCompoundToken)
-      .map((token) => token.toLocaleLowerCase())
-      .filter((token) => token.length >= 3)
-      .filter((token) => !stopWords.has(token)),
-  );
+  const baseTokens = (text.match(/[\p{L}\p{N}]+/gu) ?? [])
+    .flatMap(splitCompoundToken)
+    .map((token) => token.toLocaleLowerCase())
+    .filter((token) => token.length >= 3)
+    .filter((token) => !stopWords.has(token));
+  return new Set([...baseTokens, ...extractCjkBigrams(text)]);
+}
+
+function extractCjkBigrams(text: string): string[] {
+  const cjkRanges = text.match(/[\u4e00-\u9fff\u3400-\u4dbf]+/gu) ?? [];
+  return cjkRanges.flatMap((range) => {
+    const bigrams: string[] = [];
+    for (let i = 0; i < range.length - 1; i += 1) {
+      bigrams.push(range.slice(i, i + 2));
+    }
+    return bigrams;
+  });
 }
 
 function splitCompoundToken(token: string): string[] {

@@ -248,8 +248,14 @@ function calculateEvidenceStrength(
   signals: readonly TargetedStaticSignal[],
   semanticDraft?: SemanticJudgementDraft,
 ): EvidenceStrength {
-  if (signals.some((signal) => signal.strength === "strong")) return "strong";
-  if (signals.some((signal) => signal.strength === "medium")) return "medium";
+  const evidenceFiles = new Set(semanticDraft?.evidenceRefs.map((ref) => ref.filePath) ?? []);
+  const crossValidated = signals.filter((signal) => evidenceFiles.has(signal.filePath));
+  const uncrossValidated = signals.filter((signal) => !evidenceFiles.has(signal.filePath));
+
+  if (crossValidated.some((signal) => signal.strength === "strong")) return "strong";
+  if (uncrossValidated.some((signal) => signal.strength === "strong")) return "medium";
+  if (crossValidated.some((signal) => signal.strength === "medium")) return "medium";
+  if (uncrossValidated.some((signal) => signal.strength === "medium")) return "weak";
   if (signals.some((signal) => signal.strength === "weak")) return "weak";
   if ((semanticDraft?.evidenceRefs.length ?? 0) > 1) return "medium";
   if ((semanticDraft?.evidenceRefs.length ?? 0) === 1) return "weak";

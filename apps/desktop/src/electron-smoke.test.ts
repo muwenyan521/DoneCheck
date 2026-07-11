@@ -20,6 +20,10 @@ vi.mock("electron", () => ({
     showSaveDialog: () => Promise.resolve({ canceled: true }),
   },
   BrowserWindow: class MockBrowserWindow {
+    readonly webContents = {
+      setWindowOpenHandler: () => {},
+      on: () => {},
+    };
     constructor(options: unknown) {
       browserWindowOptions.push(options);
       if (!queriedWindows) windowCount += 1;

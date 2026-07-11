@@ -49,7 +49,7 @@ export function normalizeProviderOutput(parsed: unknown, guide: NormalizationGui
   const source = parsed as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(source)) {
-    if (guide.nullableFields.has(key) && value === null) continue;
+    if (guide.nullableFields.has(key) && (value === null || value === "")) continue;
     const nestedGuide = guide.nested.get(key);
     if (nestedGuide !== undefined && value !== null && typeof value === "object") {
       result[key] = normalizeProviderOutput(value, nestedGuide);

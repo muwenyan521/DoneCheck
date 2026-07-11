@@ -810,14 +810,15 @@ describe("createProvider factory", () => {
     }
   });
 
-  it("returns deterministic mock when no key + warns stderr mentioning OPENAI_API_KEY", () => {
+  it("throws ProviderConfigError when no key + warns stderr mentioning OPENAI_API_KEY", () => {
     const old = process.env.OPENAI_API_KEY;
     // biome-ignore lint/performance/noDelete: env vars must be deleted, not set to undefined
     delete process.env.OPENAI_API_KEY;
     const warns: string[] = [];
     try {
-      const p = createProvider({ stderr: (s: string) => warns.push(s) });
-      expect(p.metadata.provider).toBe("deterministic-mock");
+      expect(() => createProvider({ stderr: (s: string) => warns.push(s) })).toThrow(
+        ProviderConfigError,
+      );
       expect(warns.some((w) => w.includes("OPENAI_API_KEY"))).toBe(true);
     } finally {
       restoreEnv("OPENAI_API_KEY", old);

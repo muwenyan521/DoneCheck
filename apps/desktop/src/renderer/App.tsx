@@ -34,7 +34,6 @@ export function App() {
   const [pendingDecomposition, setPendingDecomposition] = useState<DecomposeResponse | undefined>();
   const [history, setHistory] = useState<readonly HistorySummary[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | undefined>();
-  const [html, setHtml] = useState("");
   const [status, setStatus] = useState<RunState>("idle");
   const [message, setMessage] = useState("选择 workspace 并填写需求后开始分析。");
   const [providerError, setProviderError] = useState<
@@ -44,6 +43,7 @@ export function App() {
   useEffect(() => {
     void loadSettings();
     void loadCredentialStatus();
+    void loadHistory();
   }, []);
 
   const canAnalyze = useMemo(
@@ -136,7 +136,6 @@ export function App() {
   async function finalizeReport(nextReport: JudgementReport) {
     setPendingDecomposition(undefined);
     setReport(nextReport);
-    await renderHtml(nextReport, settings.locale, settings.templateId);
     await updateRecentWorkspaces(workspaceDir);
     if (settings.autoSaveHistory) {
       await desktopWindow.donecheck?.history.save({
@@ -192,7 +191,6 @@ export function App() {
     setWorkspaceDir(result.data.workspaceDir);
     setSelectedHistoryId(result.data.id);
     setReport(result.data.report);
-    await renderHtml(result.data.report, settings.locale, settings.templateId);
     setStatus("ready");
     setMessage(`已载入历史：${result.data.requirementSummary}`);
   }
@@ -207,19 +205,6 @@ export function App() {
     if (selectedHistoryId === id) setSelectedHistoryId(undefined);
     setMessage(result.data.deleted ? "历史记录已删除。" : "历史记录不存在或已删除。");
     await loadHistory();
-  }
-
-  async function renderHtml(
-    nextReport: JudgementReport,
-    nextLocale: Locale,
-    nextTemplate: ReportTemplateId,
-  ) {
-    const result = await desktopWindow.donecheck?.renderHtml({
-      locale: nextLocale,
-      report: nextReport,
-      templateId: nextTemplate,
-    });
-    if (result?.ok) setHtml(result.data.html);
   }
 
   async function loadSettings() {
@@ -247,14 +232,7 @@ export function App() {
       setMessage(result?.error.message ?? "preload API unavailable");
       return;
     }
-    const previous = settings;
     setSettings(result.data);
-    if (
-      report !== undefined &&
-      (previous.locale !== result.data.locale || previous.templateId !== result.data.templateId)
-    ) {
-      await renderHtml(report, result.data.locale, result.data.templateId);
-    }
     setMessage("设置已保存。Provider、topK、ignore 与 strict 会在下一次 Analyze 生效。");
   }
 
@@ -262,8 +240,6 @@ export function App() {
     const result = await desktopWindow.donecheck?.settings.reset();
     if (result?.ok) {
       setSettings(result.data);
-      if (report !== undefined)
-        await renderHtml(report, result.data.locale, result.data.templateId);
       setMessage("非敏感设置已重置。");
     }
   }
@@ -287,9 +263,12 @@ export function App() {
   }
 
   async function exportHtml() {
+    if (report === undefined) return;
     const result = await desktopWindow.donecheck?.exportHtml({
       defaultFileName: "donecheck-report.html",
-      html,
+      locale: settings.locale,
+      report,
+      templateId: settings.templateId,
     });
     if (result?.ok) {
       setMessage(
@@ -393,7 +372,7 @@ export function App() {
           <button disabled={!canAnalyze} onClick={analyze} type="button">
             {status === "running" ? "分析中..." : "开始分析"}
           </button>
-          <button disabled={html.length === 0} onClick={exportHtml} type="button">
+          <button disabled={report === undefined} onClick={exportHtml} type="button">
             导出 HTML
           </button>
           <button disabled={report === undefined} onClick={saveHistory} type="button">

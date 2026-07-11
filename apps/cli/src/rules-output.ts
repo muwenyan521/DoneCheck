@@ -8,9 +8,9 @@ export function formatRulesJson(report: JudgementReport): string {
 
 export function formatHtml(report: JudgementReport, locale: Locale = "en"): string {
   return createHtmlReportDocument({
+    includeStyles: true,
     locale,
     report,
     template: defaultTemplate,
-    title: "DoneCheck Judgement Report",
   });
 }

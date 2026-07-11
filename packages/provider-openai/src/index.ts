@@ -261,9 +261,11 @@ export function createProvider(options: CreateProviderOptions = {}): ProviderWit
   }
   const sink = options.stderr ?? ((s: string) => process.stderr.write(s));
   sink(
-    "Warning: OPENAI_API_KEY is not set; using deterministic mock provider. Set OPENAI_API_KEY to use a real provider.\n",
+    "OPENAI_API_KEY is not set. Use --mock for deterministic mock output, or set OPENAI_API_KEY to use a real provider.\n",
   );
-  return createDeterministicMockProvider();
+  throw new ProviderConfigError(
+    "OPENAI_API_KEY is not set. Use --mock for deterministic mock output, or set OPENAI_API_KEY to use a real provider.",
+  );
 }
 
 export function createDeterministicMockProvider(): ProviderWithMetadata {

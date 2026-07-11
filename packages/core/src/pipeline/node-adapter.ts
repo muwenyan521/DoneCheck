@@ -1,5 +1,4 @@
-import type { Stats } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { relative } from "node:path";
 import type { LLMProvider } from "../semantic/provider.js";
 import type { SemanticClaim, SemanticRequirement } from "../semantic/schema.js";
@@ -50,12 +49,13 @@ async function walk(
   for (const entry of entries) {
     if (ignore.has(entry)) continue;
     const full = `${dir}/${entry}`;
-    let s: Stats;
+    let s: Awaited<ReturnType<typeof lstat>>;
     try {
-      s = await stat(full);
+      s = await lstat(full);
     } catch {
       continue;
     }
+    if (s.isSymbolicLink()) continue;
     if (s.isDirectory()) {
       await walk(root, full, ignore, out);
     } else if (/\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/u.test(entry)) {

@@ -88,7 +88,9 @@ export interface SelectWorkspaceResponse {
 
 export interface ExportHtmlRequest {
   readonly defaultFileName?: string;
-  readonly html: string;
+  readonly locale?: Locale;
+  readonly report: JudgementReport;
+  readonly templateId?: ReportTemplateId;
 }
 
 export interface ExportHtmlResponse {

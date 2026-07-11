@@ -6,6 +6,7 @@ import type {
   TargetedStaticSignal,
 } from "../rules/schema.js";
 import { selectCandidateFiles } from "../semantic/file-selection.js";
+import { mapWithConcurrency } from "../semantic/limit.js";
 import type { LLMProvider } from "../semantic/provider.js";
 import type { EvidenceSnippet, StaticSignal } from "../semantic/schema.js";
 import { draftSemanticJudgements } from "../semantic/semantic-judgement.js";
@@ -31,6 +32,7 @@ export interface OrchestrateAnalysisInput {
   readonly claims?: readonly import("../semantic/schema.js").SemanticClaim[];
   readonly requirements?: readonly import("../semantic/schema.js").SemanticRequirement[];
   readonly topK?: number;
+  readonly concurrency?: number;
 }
 
 export interface PipelineOutput {
@@ -83,6 +85,14 @@ export async function orchestrateAnalysis(
   });
 
   const fileMap = new Map(input.files.map((f) => [f.relativePath, f.content]));
+  const signalLinesByFile = new Map<string, number[]>();
+  for (const signal of [...fakeImplementationSignals, ...staticSignals]) {
+    const lines = signalLinesByFile.get(signal.filePath) ?? [];
+    if ("lineStart" in signal && typeof signal.lineStart === "number") {
+      lines.push(signal.lineStart);
+    }
+    signalLinesByFile.set(signal.filePath, lines);
+  }
   const evidenceSnippets: EvidenceSnippet[] = [];
   for (const candidatePath of selection.candidateFiles) {
     const content = fileMap.get(candidatePath);
@@ -96,12 +106,13 @@ export async function orchestrateAnalysis(
     const snippets = extractEvidenceSnippets({
       content,
       filePath: candidatePath,
-      refs: buildEvidenceRefs(candidatePath, lineCount),
+      refs: buildEvidenceRefs(candidatePath, lineCount, signalLinesByFile.get(candidatePath)),
     });
     evidenceSnippets.push(...snippets);
   }
 
   const targeted = targetSignals({
+    candidateFiles: selection.candidateFiles,
     claims,
     fakeImplementationSignals,
     matches,
@@ -109,11 +120,15 @@ export async function orchestrateAnalysis(
     staticSignals: targetStaticSignals(staticSignals),
   });
 
-  const drafts = (
-    await Promise.all(
-      requirements.map((requirement) => {
-        const match = matches.find((item) => item.requirement.id === requirement.id);
-        return draftSemanticJudgements({
+  const pipelineWarnings: string[] = [];
+  const normalizationWarnings: string[] = [];
+  const draftResults = await mapWithConcurrency(
+    requirements,
+    input.concurrency ?? 3,
+    async (requirement) => {
+      const match = matches.find((item) => item.requirement.id === requirement.id);
+      try {
+        return await draftSemanticJudgements({
           requirements: [requirement],
           ...(match === undefined ? {} : { claim: match.claim }),
           candidateFiles: selection.candidateFiles.map((p) => ({
@@ -128,21 +143,63 @@ export async function orchestrateAnalysis(
             requirement,
             staticSignals: targeted.staticSignals,
           }),
+          onNormalizationWarnings: (warnings) => {
+            for (const warning of warnings) {
+              normalizationWarnings.push(`Requirement ${requirement.id}: ${warning}`);
+            }
+          },
           provider: input.provider,
         });
-      }),
-    )
-  ).flat();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        pipelineWarnings.push(
+          `Requirement ${requirement.id} semantic judgement failed: ${message}. Degrading to insufficient-evidence.`,
+        );
+        return [];
+      }
+    },
+  );
+  const drafts = draftResults.flat();
+
+  const claimIds = new Set(claims.map((claim) => claim.id));
+  const fixedDrafts = drafts.map((draft) => {
+    const llmClaimId = draft.matchedClaimId;
+    if (llmClaimId !== undefined && claimIds.has(llmClaimId)) return draft;
+    const matchedRequirement = matches.find(
+      (item) => item.requirement.id === draft.matchedRequirementId,
+    );
+    const correctClaimId = matchedRequirement?.claim.id;
+    if (correctClaimId === undefined && llmClaimId === undefined) return draft;
+    return { ...draft, matchedClaimId: correctClaimId };
+  });
+
+  const codeEvidencedExtraScope = fixedDrafts.flatMap((draft) => {
+    if (draft.possibleExtraScope === undefined || draft.possibleExtraScope.length === 0) return [];
+    const baseId = draft.matchedRequirementId ?? draft.matchedClaimId ?? "unknown";
+    return draft.possibleExtraScope.map((description, index) => ({
+      evidenceRefs: draft.evidenceRefs,
+      id: `extra-code-${baseId}-${index}`,
+      sourceId: baseId,
+      summary: description,
+    }));
+  });
 
   const report = buildJudgementReport({
     requirements: [...requirements],
     claims: [...claims],
-    extraScopeCandidates: buildExtraScopeCandidates({ claims, matches, requirements }),
+    extraScopeCandidates: [
+      ...buildExtraScopeCandidates({ claims, matches, requirements }),
+      ...codeEvidencedExtraScope,
+    ],
     fakeImplementationSignals: targeted.fakeImplementationSignals,
     staticSignals: targeted.staticSignals,
-    semanticDrafts: drafts,
+    semanticDrafts: fixedDrafts,
     generatedAt: input.generatedAt,
   });
+
+  if (pipelineWarnings.length > 0 || normalizationWarnings.length > 0) {
+    report.warnings = [...report.warnings, ...pipelineWarnings, ...normalizationWarnings];
+  }
 
   return {
     report,
@@ -157,7 +214,7 @@ function targetStaticSignals(signals: readonly StaticSignal[]): TargetedStaticSi
   return signals.map((signal) => ({ ...signal }));
 }
 
-function buildEvidenceRefs(filePath: string, lineCount: number) {
+function buildEvidenceRefs(filePath: string, lineCount: number, signalLines?: readonly number[]) {
   const refs = [
     {
       filePath,
@@ -166,15 +223,20 @@ function buildEvidenceRefs(filePath: string, lineCount: number) {
       snippetSummary: filePath,
     },
   ];
-  for (let start = 1; start <= lineCount; start += 1) {
-    for (let end = start; end <= Math.min(lineCount, start + 39); end += 1) {
-      refs.push({
-        filePath,
-        lineStart: start,
-        lineEnd: end,
-        snippetSummary: filePath,
-      });
+  if (signalLines !== undefined) {
+    for (const line of signalLines) {
+      const start = Math.max(1, line - 5);
+      const end = Math.min(lineCount, line + 5);
+      refs.push({ filePath, lineStart: start, lineEnd: end, snippetSummary: filePath });
     }
+  }
+  if (lineCount > 40) {
+    refs.push({
+      filePath,
+      lineStart: lineCount - Math.min(lineCount, 10),
+      lineEnd: lineCount,
+      snippetSummary: filePath,
+    });
   }
   return refs;
 }

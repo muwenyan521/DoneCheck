@@ -4,12 +4,15 @@ import {
   type RequirementDecompositionOutput,
   requirementDecompositionOutputSchema,
 } from "./requirement-decomposition-schema.js";
+import type { RetryOptions } from "./retry.js";
+import { withRetry } from "./retry.js";
 import type { SemanticClaim, SemanticRequirement } from "./schema.js";
 
 export interface DecomposeRequirementsInput {
   readonly claim?: string;
   readonly provider: LLMProvider;
   readonly requirement: string;
+  readonly retry?: RetryOptions;
 }
 
 export async function decomposeRequirements(
@@ -19,11 +22,15 @@ export async function decomposeRequirements(
     requirement: input.requirement,
     ...(input.claim === undefined ? {} : { claim: input.claim }),
   });
-  const response = await input.provider.generateObject({
-    prompt,
-    schema: requirementDecompositionOutputSchema,
-    schemaName: "RequirementDecompositionOutput",
-  });
+  const response = await withRetry(
+    () =>
+      input.provider.generateObject({
+        prompt,
+        schema: requirementDecompositionOutputSchema,
+        schemaName: "RequirementDecompositionOutput",
+      }),
+    input.retry,
+  );
 
   const parsed = requirementDecompositionOutputSchema.parse(response.object);
   return stabilizeRequirementDecomposition({

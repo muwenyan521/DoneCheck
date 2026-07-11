@@ -9,6 +9,8 @@ describe("parseArgs", () => {
         evidence: { kind: "value", value: "CLI built" },
         html: false,
         json: false,
+        legacy: false,
+        mock: false,
         partialOk: false,
         confirmRequirements: false,
         requirement: { kind: "value", value: "Build CLI" },
@@ -24,6 +26,7 @@ describe("parseArgs", () => {
         "requirement.md",
         "--evidence-file",
         "evidence.md",
+        "--legacy",
         "--json",
         "--partial-ok",
       ]),
@@ -33,6 +36,8 @@ describe("parseArgs", () => {
         evidence: { kind: "file", path: "evidence.md" },
         html: false,
         json: true,
+        legacy: true,
+        mock: false,
         partialOk: true,
         confirmRequirements: false,
         requirement: { kind: "file", path: "requirement.md" },
@@ -48,6 +53,8 @@ describe("parseArgs", () => {
         evidence: { kind: "stdin" },
         html: false,
         json: false,
+        legacy: false,
+        mock: false,
         partialOk: false,
         confirmRequirements: false,
         requirement: { kind: "value", value: "Build CLI" },
@@ -133,9 +140,56 @@ describe("parseArgs", () => {
       expect(r.ok).toBe(false);
     });
 
+    it("rejects --rules + --html together", () => {
+      const r = parseArgs(["--requirement", "x", "--rules", "--html"]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("mutually exclusive");
+    });
+
+    it("rejects --json without --legacy", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--json"]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("--json requires --legacy");
+    });
+
     it("rejects --output without --html", () => {
       const r = parseArgs(["--requirement", "x", "--rules", "--output", "out.html"]);
       expect(r.ok).toBe(false);
+    });
+  });
+
+  describe("--legacy / --mock", () => {
+    it("parses --legacy", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.legacy).toBe(true);
+    });
+
+    it("parses --mock", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--mock"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.mock).toBe(true);
+    });
+
+    it("parses --legacy --json together", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy", "--json"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.value.legacy).toBe(true);
+        expect(r.value.json).toBe(true);
+      }
+    });
+
+    it("rejects --legacy + --rules together", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy", "--rules"]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("--legacy cannot be combined with --rules");
+    });
+
+    it("rejects --legacy + --html together", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy", "--html"]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("--legacy cannot be combined");
     });
   });
 });

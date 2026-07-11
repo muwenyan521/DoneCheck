@@ -17,7 +17,7 @@ describe("ReportPreview", () => {
     expect(html).toContain("Extra Scope: 1");
     expect(html).toContain("67% · Denominator: 6 · Total items: 6 · Weighted fulfilled: 4");
     expect(html).toContain("50% · Denominator: 6 · Total items: 6 · Weighted fulfilled: 3");
-    expect(html).toContain("33% · high");
+    expect(html).toContain("33% · High");
     expect(html).toContain("localStorage");
   });
 
@@ -29,6 +29,6 @@ describe("ReportPreview", () => {
     expect(html).toContain("前端报告");
     expect(html).toContain("已兑现: 1");
     expect(html).toContain("范围偏离");
-    expect(html).toContain("33% · high");
+    expect(html).toContain("33% · 高");
   });
 });

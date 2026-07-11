@@ -184,6 +184,34 @@ describe("normalizeProviderOutput", () => {
     expect(result).toEqual({ required: "x" });
   });
 
+  it("deletes empty strings for nullable-for-compat fields", () => {
+    const result = normalizeProviderOutput(
+      { required: "x", optional: "", withDefault: null },
+      guide,
+    );
+
+    expect(result).toEqual({ required: "x" });
+  });
+
+  it("normalizes then Zod parse passes for empty-string optional fields", () => {
+    const schema = z.object({
+      required: z.string(),
+      optional: z.string().optional(),
+      withDefault: z.array(z.string()).default([]),
+    });
+    const { guide } = buildStrictCompatResponseFormat(schema, "Test", true);
+
+    const providerResponse = { required: "x", optional: "", withDefault: null };
+    const normalized = normalizeProviderOutput(providerResponse, guide);
+
+    expect(() => schema.parse(normalized)).not.toThrow();
+    expect(schema.parse(normalized)).toEqual({
+      required: "x",
+      optional: undefined,
+      withDefault: [],
+    });
+  });
+
   it("leaves non-null values unchanged", () => {
     const result = normalizeProviderOutput(
       { required: "x", optional: "value", withDefault: ["a"] },

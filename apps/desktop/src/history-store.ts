@@ -28,6 +28,7 @@ interface HistoryRow {
 }
 
 const summaryMaxLength = 160;
+const maxHistoryEntries = 50;
 
 export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   const db = new Database(options.databasePath);
@@ -79,6 +80,9 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
         entry.requirementSummary,
         JSON.stringify(entry.report),
       );
+      db.prepare(
+        "DELETE FROM history_entries WHERE id NOT IN (SELECT id FROM history_entries ORDER BY created_at DESC LIMIT ?)",
+      ).run(maxHistoryEntries);
       return entry;
     },
   };

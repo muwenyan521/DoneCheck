@@ -17,6 +17,12 @@ export function createMainWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file:")) {
+      event.preventDefault();
+    }
+  });
   win.loadFile(resolve(__dirname, "renderer", "index.html"));
   return win;
 }

@@ -105,6 +105,8 @@ function options(overrides: Partial<CliOptions> = {}): CliOptions {
     confirmRequirements: false,
     html: false,
     json: false,
+    legacy: false,
+    mock: false,
     partialOk: false,
     requirement: { kind: "value", value: "Build CLI" },
     rules: false,

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { CredentialStatus } from "../desktop-provider.js";
 import type { Locale, ReportTemplateId } from "../ipc-contract.js";
 import type { ProviderErrorUx } from "../provider-error-ux.js";
@@ -190,6 +191,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
           />
           Auto-save history after analysis
         </label>
+        <p className="settings-help">
+          History entries are stored locally in SQLite and include the workspace path, requirement
+          summary, and full report JSON. Up to 50 entries are retained.
+        </p>
         <label className="checkbox-row">
           <input
             checked={props.settings.reopenLastWorkspace}
@@ -239,21 +244,46 @@ function SessionKeyInput(props: {
   readonly onSave: (apiKey: string) => void;
   readonly onClear: () => void;
 }) {
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [savedFeedback, setSavedFeedback] = useState(false);
+
+  function handleSave() {
+    const trimmed = apiKeyInput.trim();
+    if (trimmed.length === 0) return;
+    props.onSave(trimmed);
+    setApiKeyInput("");
+    setSavedFeedback(true);
+    setTimeout(() => setSavedFeedback(false), 2000);
+  }
+
   return (
     <label>
       Session-only API key
-      <input
-        type="password"
-        placeholder="Paste key for this app session only"
-        onChange={(event) => props.onSave(event.currentTarget.value)}
-      />
+      <div className="session-key-row">
+        <input
+          type="password"
+          placeholder="Paste key for this app session only"
+          value={apiKeyInput}
+          onChange={(event) => {
+            setApiKeyInput(event.currentTarget.value);
+            setSavedFeedback(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") handleSave();
+          }}
+        />
+        <button type="button" onClick={handleSave} disabled={apiKeyInput.trim().length === 0}>
+          Save key
+        </button>
+        <button type="button" onClick={props.onClear}>
+          Clear
+        </button>
+      </div>
       <span className="settings-help">
-        Current credential status: {props.credentialStatus}. This key is kept in memory for this app
-        session only and is not written to disk.
+        {savedFeedback
+          ? "Key saved for this session."
+          : `Current credential status: ${props.credentialStatus}. This key is kept in memory for this app session only and is not written to disk.`}
       </span>
-      <button type="button" onClick={props.onClear}>
-        Clear session key
-      </button>
     </label>
   );
 }

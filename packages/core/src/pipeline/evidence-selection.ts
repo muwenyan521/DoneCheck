@@ -162,10 +162,10 @@ function targetedSignalFiles(input: SelectEvidenceForRequirementInput): string[]
   }
   return [
     ...(input.fakeImplementationSignals ?? []).filter((signal) =>
-      signal.targetId === undefined ? false : targetIds.has(signal.targetId),
+      signal.targetId === undefined ? true : targetIds.has(signal.targetId),
     ),
     ...(input.staticSignals ?? []).filter((signal) =>
-      signal.targetId === undefined ? false : targetIds.has(signal.targetId),
+      signal.targetId === undefined ? true : targetIds.has(signal.targetId),
     ),
   ]
     .map((signal) => signal.filePath)

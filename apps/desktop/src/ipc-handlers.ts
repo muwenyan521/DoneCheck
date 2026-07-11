@@ -128,27 +128,13 @@ async function renderHtml(request: RenderHtmlRequest): Promise<RenderHtmlRespons
   const template =
     request.templateId === undefined ? defaultTemplate : getTemplateById(request.templateId);
   const html = createHtmlReportDocument({
+    includeStyles: true,
     locale: request.locale ?? "zh-CN",
     report: request.report,
     template: template ?? defaultTemplate,
-    title: "DoneCheck Report",
   });
-  return {
-    html: injectDesktopExportStyles(html),
-  };
+  return { html };
 }
-
-export function injectDesktopExportStyles(html: string): string {
-  if (html.includes('data-donecheck-desktop-export="true"')) return html;
-  const headCloseMatch = /<\/head\s*>/iu.exec(html);
-  if (headCloseMatch === null || headCloseMatch.index === undefined) return html;
-  const insertAt = headCloseMatch.index;
-  return `${html.slice(0, insertAt)}${desktopExportStyleTag}${html.slice(insertAt)}`;
-}
-
-const desktopExportStyleTag = `<style data-donecheck-desktop-export="true">
-:root{color:#172033;background:#eef3f8;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;padding:32px;background:linear-gradient(135deg,#eef3f8 0%,#f8fafc 48%,#e8f0ff 100%)}article[data-locale]{max-width:1120px;margin:0 auto;border:1px solid #d8e2ed;border-radius:28px;background:rgba(255,255,255,.96);box-shadow:0 24px 80px rgba(23,32,51,.12);padding:32px}header{border-bottom:1px solid #d8e2ed;margin-bottom:24px;padding-bottom:20px}h1{font-size:32px;letter-spacing:-.03em;margin:0 0 8px}h2{font-size:20px;margin:24px 0 12px}h3{font-size:16px;margin:0 0 8px}p,dd,li{line-height:1.6}section{margin:24px 0}dl{display:grid;grid-template-columns:minmax(160px,max-content) 1fr;gap:10px 18px;margin:0}dt{color:#526171;font-weight:800}dd{margin:0}ul{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;list-style:none;padding:0}li{border:1px solid #d8e2ed;border-radius:14px;background:#f8fafc;padding:10px 12px}article article{border:1px solid #d8e2ed;border-left:6px solid #1f6feb;border-radius:18px;background:#fff;margin:14px 0;padding:16px}article article[data-highlighted="true"]{border-left-color:#d97706;background:#fffbeb}article article[data-kind="extra-scope"]{border-left-color:#7c3aed}pre{white-space:pre-wrap;overflow:auto;border-radius:14px;background:#0f172a;color:#dbeafe;padding:14px}details{border:1px solid #d8e2ed;border-radius:16px;background:#f8fafc;margin:12px 0;padding:12px}summary{cursor:pointer;font-weight:800}@media (max-width:720px){body{padding:16px}article[data-locale]{padding:20px;border-radius:20px}dl{grid-template-columns:1fr}ul{grid-template-columns:1fr}}
-</style>`;
 
 async function selectWorkspace(
   dependencies: DesktopIpcHandlerDependencies,
@@ -161,13 +147,21 @@ async function exportHtml(
   request: ExportHtmlRequest,
   dependencies: DesktopIpcHandlerDependencies,
 ): Promise<ExportHtmlResponse> {
-  if (typeof request.html !== "string" || request.html.trim().length === 0) {
-    throw invalidInput("html is required");
+  if (request.report === undefined || request.report === null) {
+    throw invalidInput("report is required");
   }
+  const template =
+    request.templateId === undefined ? defaultTemplate : getTemplateById(request.templateId);
+  const html = createHtmlReportDocument({
+    includeStyles: true,
+    locale: request.locale ?? "zh-CN",
+    report: request.report,
+    template: template ?? defaultTemplate,
+  });
   const defaultFileName = request.defaultFileName ?? "donecheck-report.html";
   const filePath = await dependencies.saveDialog?.(defaultFileName);
   if (filePath === undefined) return {};
-  await writeFile(filePath, request.html, "utf8");
+  await writeFile(filePath, html, "utf8");
   return { filePath };
 }
 

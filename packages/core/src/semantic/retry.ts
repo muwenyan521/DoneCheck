@@ -8,7 +8,7 @@ export async function withRetry<T>(
   operation: () => Promise<T>,
   options: RetryOptions = {},
 ): Promise<T> {
-  const maxAttempts = options.maxAttempts ?? 1;
+  const maxAttempts = options.maxAttempts ?? 3;
   const baseDelayMs = options.baseDelayMs ?? 25;
   const sleep = options.sleep ?? defaultSleep;
 
@@ -20,7 +20,8 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
       if (attempt === maxAttempts) break;
-      await sleep(baseDelayMs * 2 ** (attempt - 1));
+      const jitter = Math.random() * baseDelayMs;
+      await sleep(baseDelayMs * 2 ** (attempt - 1) + jitter);
     }
   }
 

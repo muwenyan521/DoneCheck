@@ -20,6 +20,8 @@ export interface CliOptions {
   readonly evidence: EvidenceSource;
   readonly html: boolean;
   readonly json: boolean;
+  readonly legacy: boolean;
+  readonly mock: boolean;
   readonly output?: string;
   readonly partialOk: boolean;
   readonly requirement: TextSource;
@@ -53,6 +55,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   let partialOk = false;
   let rules = false;
   let html = false;
+  let legacy = false;
+  let mock = false;
   let confirmRequirements = false;
   let output: string | undefined;
   let workspace: string | undefined;
@@ -118,6 +122,14 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         html = true;
         break;
       }
+      case "--legacy": {
+        legacy = true;
+        break;
+      }
+      case "--mock": {
+        mock = true;
+        break;
+      }
       case "--confirm-requirements": {
         confirmRequirements = true;
         break;
@@ -146,9 +158,31 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     return { error: "Missing requirement. Use --requirement or --requirement-file.", ok: false };
   }
 
+  if (legacy && (rules || html)) {
+    return {
+      error: "--legacy cannot be combined with --rules or --html.",
+      ok: false,
+    };
+  }
+
+  if (rules && html) {
+    return {
+      error:
+        "--rules and --html are mutually exclusive. Use --html for HTML output or --rules for rules JSON with machine-readable exit codes.",
+      ok: false,
+    };
+  }
+
   if (json && (rules || html)) {
     return {
       error: "--json cannot be combined with --rules or --html.",
+      ok: false,
+    };
+  }
+
+  if (json && !legacy) {
+    return {
+      error: "--json requires --legacy mode.",
       ok: false,
     };
   }
@@ -167,6 +201,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       confirmRequirements,
       html,
       json,
+      legacy,
+      mock,
       partialOk,
       requirement,
       rules,

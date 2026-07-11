@@ -18,6 +18,7 @@ export interface DraftSemanticJudgementInput {
   readonly candidateFiles?: readonly CandidateFileMetadata[];
   readonly claim?: SemanticClaim;
   readonly evidenceSnippets: readonly EvidenceSnippet[];
+  readonly onNormalizationWarnings?: (warnings: readonly string[]) => void;
   readonly provider: LLMProvider;
   readonly requirement: SemanticRequirement;
   readonly retry?: RetryOptions;
@@ -28,6 +29,7 @@ export interface DraftSemanticJudgementsInput {
   readonly claim?: SemanticClaim;
   readonly concurrency?: number;
   readonly evidenceSnippets: readonly EvidenceSnippet[];
+  readonly onNormalizationWarnings?: (warnings: readonly string[]) => void;
   readonly provider: LLMProvider;
   readonly requirements: readonly SemanticRequirement[];
   readonly retry?: RetryOptions;
@@ -57,6 +59,10 @@ export async function draftSemanticJudgement(
   const normalized = normalizeEvidenceRefs(draft.evidenceRefs, input.evidenceSnippets);
   const canonicalRefs = collectCanonicalRefs(normalized);
 
+  if (input.onNormalizationWarnings !== undefined && normalized.warnings.length > 0) {
+    input.onNormalizationWarnings(normalized.warnings);
+  }
+
   return { ...draft, evidenceRefs: canonicalRefs };
 }
 
@@ -71,6 +77,9 @@ export async function draftSemanticJudgements(
       ...(input.candidateFiles === undefined ? {} : { candidateFiles: input.candidateFiles }),
       ...(input.claim === undefined ? {} : { claim: input.claim }),
       ...(input.retry === undefined ? {} : { retry: input.retry }),
+      ...(input.onNormalizationWarnings === undefined
+        ? {}
+        : { onNormalizationWarnings: input.onNormalizationWarnings }),
     }),
   );
 }

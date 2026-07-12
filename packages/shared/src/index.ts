@@ -108,12 +108,7 @@ export type ReportTemplateId = z.infer<typeof reportTemplateIdSchema>;
 export const reportTemplateScenarioSchema = z.enum(["form", "frontend", "generic", "todo"]);
 export type ReportTemplateScenario = z.infer<typeof reportTemplateScenarioSchema>;
 
-export const reportTemplateSectionSchema = z.enum([
-  "debug",
-  "judgements",
-  "overview",
-  "risk-highlights",
-]);
+export const reportTemplateSectionSchema = z.enum(["judgements", "overview", "risk-highlights"]);
 export type ReportTemplateSection = z.infer<typeof reportTemplateSectionSchema>;
 
 export const reportTemplateFinalStatusSchema = z.enum([
@@ -164,7 +159,7 @@ export function parseReportTemplate(template: unknown): ReportTemplate {
 export const DONECHECK_SCHEMA_VERSION = "0.0.0";
 
 /**
- * Stage 4 report contracts.
+ * Shared report contracts.
  *
  * These schemas and types describe the stable output shape of the rules
  * engine (`@donecheck/core/rules`). They live in `shared` so that consumers
@@ -311,8 +306,20 @@ export const summaryStatsSchema = z.object({
 
 export type SummaryStats = z.infer<typeof summaryStatsSchema>;
 
+export const consolidatedRepairPromptSchema = z.object({
+  content: z.object({
+    "zh-CN": nonEmptyTrimmedString,
+    en: nonEmptyTrimmedString,
+  }),
+  includedJudgementIds: z.array(nonEmptyTrimmedString),
+  version: nonEmptyTrimmedString,
+});
+
+export type ConsolidatedRepairPrompt = z.infer<typeof consolidatedRepairPromptSchema>;
+
 export const judgementReportSchema = z.object({
   claimCoverage: coverageResultSchema,
+  consolidatedRepairPrompt: consolidatedRepairPromptSchema,
   generatedAt: z.string().datetime(),
   judgements: z.array(finalJudgementSchema),
   requirementCoverage: coverageResultSchema,

@@ -47,7 +47,13 @@ export function createSettingsStore(options: SettingsStoreOptions): SettingsStor
       return defaultDesktopSettings;
     },
     set: (patch) => {
-      const next = normalizeSettings({ ...readSettings(db), ...patch });
+      const next = normalizeSettings({
+        ...readSettings(db),
+        ...patch,
+        ...(patch.providerBaseUrl === undefined
+          ? {}
+          : { providerBaseUrl: normalizeProviderBaseUrl(patch.providerBaseUrl) }),
+      });
       const statement = db.prepare(
         "INSERT INTO app_settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
       );
@@ -88,7 +94,7 @@ function normalizeSettings(value: Record<string, unknown>): DesktopSettings {
       value.locale === "en" || value.locale === "zh-CN"
         ? value.locale
         : defaultDesktopSettings.locale,
-    providerBaseUrl: readString(value.providerBaseUrl, defaultDesktopSettings.providerBaseUrl),
+    providerBaseUrl: normalizeStoredProviderBaseUrl(value.providerBaseUrl),
     providerMode:
       value.providerMode === "mock" || value.providerMode === "openai-compatible"
         ? value.providerMode
@@ -99,14 +105,6 @@ function normalizeSettings(value: Record<string, unknown>): DesktopSettings {
       value.reopenLastWorkspace,
       defaultDesktopSettings.reopenLastWorkspace,
     ),
-    showDebugSections: readBoolean(
-      value.showDebugSections,
-      defaultDesktopSettings.showDebugSections,
-    ),
-    structuredOutputStrict: readBoolean(
-      value.structuredOutputStrict,
-      defaultDesktopSettings.structuredOutputStrict,
-    ),
     templateId:
       value.templateId === "generic" ||
       value.templateId === "todo" ||
@@ -115,6 +113,48 @@ function normalizeSettings(value: Record<string, unknown>): DesktopSettings {
         : defaultDesktopSettings.templateId,
     topK: readPositiveInteger(value.topK, defaultDesktopSettings.topK),
   };
+}
+
+export function normalizeProviderBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error("Enter a valid online analysis address.");
+  }
+  if (url.username.length > 0 || url.password.length > 0) {
+    throw new Error("The online analysis address must not include a username or password.");
+  }
+  const isHttps = url.protocol === "https:";
+  const isLoopbackHttp = url.protocol === "http:" && isLoopbackHost(url.hostname);
+  if (!isHttps && !isLoopbackHttp) {
+    throw new Error("The online analysis address must use HTTPS, except on this device.");
+  }
+  url.hash = "";
+  if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/u, "");
+  return url.toString().replace(/\/$/u, url.pathname === "/" ? "" : "/");
+}
+
+function normalizeStoredProviderBaseUrl(value: unknown): string {
+  if (typeof value !== "string") return defaultDesktopSettings.providerBaseUrl;
+  try {
+    return normalizeProviderBaseUrl(value);
+  } catch {
+    return defaultDesktopSettings.providerBaseUrl;
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLocaleLowerCase();
+  if (normalized === "localhost" || normalized === "[::1]" || normalized === "::1") return true;
+  const octets = normalized.split(".");
+  return (
+    octets.length === 4 &&
+    octets[0] === "127" &&
+    octets.every((octet) => /^\d{1,3}$/u.test(octet) && Number(octet) <= 255)
+  );
 }
 
 function readString(value: unknown, fallback: string): string {

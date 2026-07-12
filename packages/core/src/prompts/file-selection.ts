@@ -3,7 +3,7 @@ import type { StaticSignal } from "../semantic/schema.js";
 export const FILE_SELECTION_PROMPT_VERSION = "file-selection-v2";
 
 export const fileSelectionSystemPromptTemplate = [
-  `DoneCheck phase 3 file selection prompt ${FILE_SELECTION_PROMPT_VERSION}.`,
+  `DoneCheck file selection prompt ${FILE_SELECTION_PROMPT_VERSION}.`,
   "",
   "## Role",
   "You are a code-navigation assistant. Select candidate files that most likely contain the implementation (or absence of implementation) relevant to the given requirement, for later semantic analysis.",

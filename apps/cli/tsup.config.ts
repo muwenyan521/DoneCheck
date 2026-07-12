@@ -4,9 +4,9 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   ...nodeLibraryPreset,
   banner: {
-    js: "#!/usr/bin/env node",
+    js: '#!/usr/bin/env node\nimport { createRequire } from "node:module"; const require = createRequire(import.meta.url);',
   },
   dts: false,
   format: ["esm"],
-  noExternal: ["react", "react-dom"],
+  noExternal: [/.*/],
 });

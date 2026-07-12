@@ -1,6 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runDoneCheckPipelineNode } from "@donecheck/core";
+import {
+  WorkspaceValidationError,
+  runDoneCheckPipelineNode,
+  validateWorkspace,
+} from "@donecheck/core";
 import type { LLMProvider } from "@donecheck/core";
 import { decomposeRequirements } from "@donecheck/core/semantic";
 import { createHtmlReportDocument } from "@donecheck/report-ui";
@@ -9,6 +13,7 @@ import type { DesktopProviderFactory, SessionCredentialStore } from "./desktop-p
 import type { HistoryStore } from "./history-store.js";
 import type {
   AnalyzeRequest,
+  CopyRepairPromptRequest,
   CredentialSetSessionApiKeyRequest,
   CredentialStatusResponse,
   DecomposeRequest,
@@ -21,6 +26,7 @@ import type {
   HistoryDeleteRequest,
   HistoryEntry,
   HistoryGetRequest,
+  HistoryRestoreRequest,
   HistorySaveRequest,
   HistorySummary,
   RenderHtmlRequest,
@@ -28,6 +34,7 @@ import type {
   SelectWorkspaceResponse,
   SettingsSetRequest,
 } from "./ipc-contract.js";
+import { classifyProviderErrorKind } from "./provider-error-kind.js";
 import type { DesktopSettings, SettingsStore } from "./settings-store.js";
 
 type HandlerResult<T> = Promise<DesktopIpcResult<T>>;
@@ -40,6 +47,7 @@ export interface DesktopIpcHandlerDependencies {
   readonly desktopProviderFactory?: DesktopProviderFactory;
   readonly settingsStore?: SettingsStore;
   readonly credentials?: SessionCredentialStore;
+  readonly writeClipboardText?: (text: string) => void;
 }
 
 const historyNotImplemented = {
@@ -60,17 +68,41 @@ const credentialsNotImplemented = {
 export function createDesktopIpcHandlers(
   dependencies: DesktopIpcHandlerDependencies = {},
 ): DesktopApi {
+  const activeRequests = new Map<string, AbortController>();
   return {
-    decompose: (request) => withStructuredErrors(() => decompose(request, dependencies)),
-    analyze: (request) => withStructuredErrors(() => analyze(request, dependencies)),
+    decompose: (request) =>
+      withStructuredErrors(
+        () =>
+          withAnalysisRequest(request.requestId, activeRequests, (signal) =>
+            decompose(request, dependencies, signal),
+          ),
+        "analysis",
+      ),
+    analyze: (request) =>
+      withStructuredErrors(
+        () =>
+          withAnalysisRequest(request.requestId, activeRequests, (signal) =>
+            analyze(request, dependencies, signal),
+          ),
+        "analysis",
+      ),
+    cancelAnalysis: (request) =>
+      withStructuredErrors(async () => {
+        validateRequestId(request.requestId);
+        activeRequests.get(request.requestId)?.abort(canceledError());
+      }),
     renderHtml: (request) => withStructuredErrors(() => renderHtml(request)),
     selectWorkspace: () => withStructuredErrors(() => selectWorkspace(dependencies)),
     exportHtml: (request) => withStructuredErrors(() => exportHtml(request, dependencies)),
+    copyRepairPrompt: (request) =>
+      withStructuredErrors(() => copyRepairPrompt(request, dependencies)),
     history: {
       list: () => withStructuredErrors(() => historyList(dependencies)),
       get: (request) => withStructuredErrors(() => historyGet(request, dependencies)),
       save: (request) => withStructuredErrors(() => historySave(request, dependencies)),
       delete: (request) => withStructuredErrors(() => historyDelete(request, dependencies)),
+      restore: (request) => withStructuredErrors(() => historyRestore(request, dependencies)),
+      clear: () => withStructuredErrors(() => historyClear(dependencies)),
     },
     settings: {
       get: () => withStructuredErrors(() => settingsGet(dependencies)),
@@ -87,8 +119,26 @@ export function createDesktopIpcHandlers(
   };
 }
 
-async function analyze(request: AnalyzeRequest, dependencies: DesktopIpcHandlerDependencies) {
+async function copyRepairPrompt(
+  request: CopyRepairPromptRequest,
+  dependencies: DesktopIpcHandlerDependencies,
+): Promise<void> {
+  if (typeof request.text !== "string" || request.text.trim().length === 0) {
+    throw invalidInput("repair prompt text is required");
+  }
+  if (dependencies.writeClipboardText === undefined) {
+    throw notImplemented("clipboard dependency was not provided");
+  }
+  dependencies.writeClipboardText(request.text);
+}
+
+async function analyze(
+  request: AnalyzeRequest,
+  dependencies: DesktopIpcHandlerDependencies,
+  signal: AbortSignal,
+) {
   validateAnalyzeRequest(request);
+  await validateWorkspace(request.workspaceDir, request.options?.ignore);
   const provider =
     dependencies.providerFactory?.() ?? dependencies.desktopProviderFactory?.createProvider();
   if (provider === undefined) throw invalidInput("provider dependency was not provided");
@@ -104,6 +154,7 @@ async function analyze(request: AnalyzeRequest, dependencies: DesktopIpcHandlerD
       : { generatedAt: request.options.generatedAt }),
     ...(request.options?.topK === undefined ? {} : { topK: request.options.topK }),
     ...(request.options?.ignore === undefined ? {} : { ignore: request.options.ignore }),
+    signal,
   });
   return result.report;
 }
@@ -111,8 +162,10 @@ async function analyze(request: AnalyzeRequest, dependencies: DesktopIpcHandlerD
 async function decompose(
   request: DecomposeRequest,
   dependencies: DesktopIpcHandlerDependencies,
+  signal: AbortSignal,
 ): Promise<DecomposeResponse> {
   validateDecomposeRequest(request);
+  await validateWorkspace(request.workspaceDir);
   const provider =
     dependencies.providerFactory?.() ?? dependencies.desktopProviderFactory?.createProvider();
   if (provider === undefined) throw invalidInput("provider dependency was not provided");
@@ -120,6 +173,7 @@ async function decompose(
     requirement: request.requirement,
     provider,
     ...(request.claim === undefined ? {} : { claim: request.claim }),
+    signal,
   });
   return decomposition;
 }
@@ -196,6 +250,19 @@ async function historyDelete(
   return requireHistoryStore(dependencies).delete(request);
 }
 
+async function historyRestore(
+  request: HistoryRestoreRequest,
+  dependencies: DesktopIpcHandlerDependencies,
+): Promise<{ readonly restored: boolean }> {
+  return requireHistoryStore(dependencies).restore(request);
+}
+
+async function historyClear(
+  dependencies: DesktopIpcHandlerDependencies,
+): Promise<{ readonly cleared: number }> {
+  return requireHistoryStore(dependencies).clear();
+}
+
 async function settingsGet(dependencies: DesktopIpcHandlerDependencies): Promise<DesktopSettings> {
   return requireSettingsStore(dependencies).get();
 }
@@ -234,32 +301,27 @@ async function credentialStatus(
 
 function requireHistoryStore(dependencies: DesktopIpcHandlerDependencies): HistoryStore {
   if (dependencies.historyStore === undefined) {
-    throw Object.assign(new Error(historyNotImplemented.message), {
-      code: historyNotImplemented.code,
-    });
+    throw notImplemented(historyNotImplemented.message);
   }
   return dependencies.historyStore;
 }
 
 function requireSettingsStore(dependencies: DesktopIpcHandlerDependencies): SettingsStore {
   if (dependencies.settingsStore === undefined) {
-    throw Object.assign(new Error(settingsNotImplemented.message), {
-      code: settingsNotImplemented.code,
-    });
+    throw notImplemented(settingsNotImplemented.message);
   }
   return dependencies.settingsStore;
 }
 
 function requireCredentials(dependencies: DesktopIpcHandlerDependencies): SessionCredentialStore {
   if (dependencies.credentials === undefined) {
-    throw Object.assign(new Error(credentialsNotImplemented.message), {
-      code: credentialsNotImplemented.code,
-    });
+    throw notImplemented(credentialsNotImplemented.message);
   }
   return dependencies.credentials;
 }
 
 function validateAnalyzeRequest(request: AnalyzeRequest): void {
+  validateRequestId(request.requestId);
   if (typeof request.workspaceDir !== "string" || request.workspaceDir.trim().length === 0) {
     throw invalidInput("workspaceDir is required");
   }
@@ -269,6 +331,7 @@ function validateAnalyzeRequest(request: AnalyzeRequest): void {
 }
 
 function validateDecomposeRequest(request: DecomposeRequest): void {
+  validateRequestId(request.requestId);
   if (typeof request.workspaceDir !== "string" || request.workspaceDir.trim().length === 0) {
     throw invalidInput("workspaceDir is required");
   }
@@ -277,28 +340,85 @@ function validateDecomposeRequest(request: DecomposeRequest): void {
   }
 }
 
-async function withStructuredErrors<T>(fn: () => Promise<T>): HandlerResult<T> {
+function validateRequestId(requestId: string): void {
+  if (typeof requestId !== "string" || requestId.trim().length === 0) {
+    throw invalidInput("requestId is required");
+  }
+}
+
+async function withAnalysisRequest<T>(
+  requestId: string,
+  activeRequests: Map<string, AbortController>,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  validateRequestId(requestId);
+  activeRequests.get(requestId)?.abort(canceledError());
+  const controller = new AbortController();
+  activeRequests.set(requestId, controller);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    if (activeRequests.get(requestId) === controller) activeRequests.delete(requestId);
+  }
+}
+
+async function withStructuredErrors<T>(
+  fn: () => Promise<T>,
+  operation: "analysis" | "desktop" = "desktop",
+): HandlerResult<T> {
   try {
     return { ok: true, data: await fn() };
   } catch (error) {
-    return { ok: false, error: toDesktopIpcError(error) };
+    return { ok: false, error: toDesktopIpcError(error, operation) };
   }
 }
 
-function invalidInput(message: string): Error & { readonly code: "invalid-input" } {
-  return Object.assign(new Error(message), { code: "invalid-input" as const });
+class InvalidDesktopInputError extends Error {
+  readonly code = "invalid-input" as const;
+  override readonly name = "InvalidDesktopInputError";
 }
 
-function toDesktopIpcError(error: unknown): DesktopIpcError {
-  if (isErrorWithCode(error) && error.code === "invalid-input") {
+class AnalysisCanceledError extends Error {
+  readonly code = "canceled" as const;
+  override readonly name = "AnalysisCanceledError";
+}
+
+class DesktopFeatureNotImplementedError extends Error {
+  readonly code = "not-implemented" as const;
+  override readonly name = "DesktopFeatureNotImplementedError";
+}
+
+function invalidInput(message: string): InvalidDesktopInputError {
+  return new InvalidDesktopInputError(message);
+}
+
+function canceledError(): AnalysisCanceledError {
+  return new AnalysisCanceledError("Analysis canceled");
+}
+
+function notImplemented(message: string): DesktopFeatureNotImplementedError {
+  return new DesktopFeatureNotImplementedError(message);
+}
+
+function toDesktopIpcError(error: unknown, operation: "analysis" | "desktop"): DesktopIpcError {
+  if (error instanceof WorkspaceValidationError) {
+    return { code: "invalid-input", message: "The selected project folder is invalid." };
+  }
+  if (error instanceof AnalysisCanceledError) {
+    return { code: "canceled", message: error.message };
+  }
+  if (error instanceof InvalidDesktopInputError) {
     return { code: "invalid-input", message: error.message };
   }
-  if (isErrorWithCode(error) && error.code === "not-implemented") {
+  if (error instanceof DesktopFeatureNotImplementedError) {
     return { code: "not-implemented", message: error.message };
   }
-  return { code: "unknown", message: error instanceof Error ? error.message : "Unknown error" };
-}
-
-function isErrorWithCode(error: unknown): error is Error & { readonly code: string } {
-  return error instanceof Error && "code" in error;
+  if (operation === "analysis") {
+    return {
+      code: "provider-error",
+      message: "Online analysis could not be completed.",
+      providerErrorKind: classifyProviderErrorKind(error),
+    };
+  }
+  return { code: "unknown", message: "The requested operation could not be completed." };
 }

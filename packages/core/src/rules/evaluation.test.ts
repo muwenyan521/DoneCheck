@@ -72,6 +72,75 @@ describe("evaluateFinalJudgement", () => {
     expect(judgement.reasonCode).toBe("fake-implementation-signal-detected");
   });
 
+  it("returns insufficient-evidence when a suspicious draft has no direct implementation evidence", () => {
+    const judgement = evaluateFinalJudgement({
+      fakeImplementationSignals: [
+        {
+          filePath: "requirements/audit.md",
+          lineEnd: 8,
+          lineStart: 8,
+          pattern: "todo",
+          strength: "medium",
+        },
+      ],
+      item: { id: "req-1", kind: "requirement", sourceId: "req-1" },
+      semanticDraft: {
+        confidence: 1,
+        evidenceRefs: [
+          {
+            filePath: "requirements/audit.md",
+            lineEnd: 8,
+            lineStart: 8,
+            snippetSummary: "Audit instruction mentioning TODO markers.",
+          },
+        ],
+        explanation: "The requirement asks the reviewer to find TODO markers.",
+        judgementDraft: "suspicious",
+        matchedRequirementId: "req-1",
+        repairSuggestion: "Inspect implementation files before reaching a conclusion.",
+      },
+      signals: [],
+    });
+
+    expect(judgement.finalStatus).toBe("insufficient-evidence");
+    expect(judgement.reasonCode).toBe("weak-or-unstable-evidence");
+    expect(judgement.confidenceLevel).not.toBe("high");
+  });
+
+  it("does not treat an audit instruction as proof of a fake implementation", () => {
+    const judgement = evaluateFinalJudgement({
+      fakeImplementationSignals: [
+        {
+          filePath: "requirements/review.txt",
+          lineEnd: 1,
+          lineStart: 1,
+          pattern: "not-implemented",
+          strength: "strong",
+        },
+      ],
+      item: { id: "claim-1", kind: "claim", sourceId: "claim-1" },
+      semanticDraft: {
+        confidence: 0.95,
+        evidenceRefs: [
+          {
+            filePath: "requirements/review.txt",
+            lineEnd: 1,
+            lineStart: 1,
+            snippetSummary: "Instruction to identify features that are not implemented.",
+          },
+        ],
+        explanation: "The text says to identify features that are not implemented.",
+        judgementDraft: "suspicious",
+        matchedClaimId: "claim-1",
+        repairSuggestion: "Collect evidence from the implementation.",
+      },
+      signals: [],
+    });
+
+    expect(judgement.finalStatus).toBe("insufficient-evidence");
+    expect(judgement.reasonCode).toBe("weak-or-unstable-evidence");
+  });
+
   it("returns unfulfilled for unsupported draft with almost no evidence", () => {
     const judgement = evaluateFinalJudgement({
       item: { id: "req-1", kind: "requirement", sourceId: "req-1" },
@@ -124,7 +193,7 @@ describe("evaluateFinalJudgement", () => {
     expect(judgement.reasonCode).toBe("extra-scope-detected");
   });
 
-  it("downgrades fulfilled draft to suspicious-fake-implementation when a confirmed fake signal is present", () => {
+  it("does not override a fulfilled semantic draft with an unrelated file-level fake signal", () => {
     const judgement = evaluateFinalJudgement({
       fakeImplementationSignals: [
         {
@@ -147,8 +216,8 @@ describe("evaluateFinalJudgement", () => {
       signals: [{ filePath: "src/auth/session.ts", keyword: "localStorage", strength: "strong" }],
     });
 
-    expect(judgement.finalStatus).toBe("suspicious-fake-implementation");
-    expect(judgement.reasonCode).toBe("fake-implementation-signal-detected");
+    expect(judgement.finalStatus).toBe("fulfilled");
+    expect(judgement.reasonCode).toBe("semantic-fulfilled-with-strong-evidence");
   });
 });
 
@@ -264,6 +333,21 @@ describe("buildJudgementReport", () => {
     expect(report.judgements.map((judgement) => judgement.reasonCode)).toContain(
       "fake-implementation-signal-detected",
     );
+    expect(report.consolidatedRepairPrompt.includedJudgementIds).toEqual([
+      "requirement:req-2",
+      "claim:claim-2",
+      "extra-scope:extra-1",
+    ]);
+    expect(report.consolidatedRepairPrompt.content.en).toContain("Implement logout.");
+    expect(report.consolidatedRepairPrompt.content.en).toContain("Implement logout behavior.");
+    for (const internalTerm of [
+      "rules-v1",
+      "fake-implementation-signal-detected",
+      "Semantic",
+      "suspicious-fake-implementation",
+    ]) {
+      expect(report.consolidatedRepairPrompt.content.en).not.toContain(internalTerm);
+    }
   });
 
   it("produces identical output for identical input to keep the rule engine pure", () => {
@@ -329,5 +413,9 @@ describe("buildJudgementReport", () => {
       weightedFulfilled: 0,
     });
     expect(report.summaryStats["insufficient-evidence"]).toBe(2);
+    expect(report.warnings).toContain(
+      "Some items still need more evidence before they can be assessed.",
+    );
+    expect(report.warnings.join(" ")).not.toMatch(/denominator/i);
   });
 });

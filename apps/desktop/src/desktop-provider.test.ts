@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("desktop provider assembly", () => {
-  it("uses deterministic mock only when provider mode is explicit mock", () => {
+  it("uses local demo data only when provider mode is explicit mock", () => {
     process.env.OPENAI_API_KEY = "env-key";
     const credentials = createSessionCredentialStore();
     credentials.setSessionApiKey("session-key");
@@ -40,7 +40,6 @@ describe("desktop provider assembly", () => {
         providerBaseUrl: "https://compatible.example/v1",
         providerMode: "openai-compatible",
         providerModel: "compatible-model",
-        structuredOutputStrict: false,
       }),
     });
 
@@ -51,7 +50,6 @@ describe("desktop provider assembly", () => {
       baseURL: "https://compatible.example/v1",
       model: "compatible-model",
       providerMode: "openai-compatible",
-      structuredOutputStrict: false,
     });
     const provider = factory.createProvider();
     expect(typeof provider.generateObject).toBe("function");
@@ -72,7 +70,6 @@ describe("desktop provider assembly", () => {
       baseURL: "https://env-compatible.example/v1",
       model: "env-model",
       providerMode: "openai-compatible",
-      structuredOutputStrict: true,
     });
   });
 
@@ -83,9 +80,7 @@ describe("desktop provider assembly", () => {
       getSettings: () => ({ ...defaultDesktopSettings, providerMode: "openai-compatible" }),
     });
 
-    expect(() => factory.createProvider()).toThrow(
-      "OpenAI-compatible mode requires an API key. Enter a session key, set OPENAI_API_KEY, or switch to Deterministic mock.",
-    );
+    expect(() => factory.createProvider()).toThrow("Online analysis requires an access key.");
     expect(factory.getCredentialStatus()).toBe("none");
   });
 

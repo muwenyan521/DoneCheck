@@ -1,5 +1,5 @@
 import { reportTemplates } from "@donecheck/templates";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CredentialStatus,
   DecomposeResponse,
@@ -8,18 +8,50 @@ import type {
   Locale,
   ReportTemplateId,
 } from "../ipc-contract.js";
-import { classifyProviderError } from "../provider-error-ux.js";
+import type { ProviderErrorKind } from "../provider-error-kind.js";
+import { type ProviderErrorUx, providerErrorUxForKind } from "../provider-error-ux.js";
 import { type DesktopSettingsPatch, defaultDesktopSettings } from "../settings-model.js";
 import { DecompositionReviewPanel } from "./DecompositionReviewPanel.js";
 import { ReportPreview } from "./ReportPreview.js";
 import { ProviderErrorNotice, SettingsPanel } from "./SettingsPanel.js";
-import { proceedAnalyze, startAnalyzeFlow } from "./analyze-flow.js";
-
-type RunState = "idle" | "running" | "ready" | "error";
+import { getAnalysisStatusText } from "./analysis-status-copy.js";
+import {
+  type AnalyzeFlowError,
+  type AnalyzeRequestSnapshot,
+  createAnalyzeRequestSnapshot,
+  proceedAnalyze,
+  startAnalyzeFlow,
+} from "./analyze-flow.js";
+import { applyUserInput, saveHistoryWithFeedback } from "./app-feedback.js";
+import { getDesktopOperationFeedback } from "./desktop-operation-feedback.js";
+import { copyRepairPrompt } from "./repair-prompt-copy.js";
 
 interface DoneCheckDesktopWindow {
   readonly donecheck?: import("../ipc-contract.js").DesktopApi;
 }
+
+type AnalysisState =
+  | { readonly kind: "ready" }
+  | { readonly kind: "decomposing"; readonly snapshot: AnalyzeRequestSnapshot }
+  | {
+      readonly kind: "review";
+      readonly snapshot: AnalyzeRequestSnapshot;
+      readonly decomposition: DecomposeResponse;
+    }
+  | { readonly kind: "analyzing"; readonly snapshot: AnalyzeRequestSnapshot }
+  | {
+      readonly kind: "complete";
+      readonly snapshot: AnalyzeRequestSnapshot;
+      readonly report: JudgementReport;
+    }
+  | {
+      readonly kind: "error";
+      readonly source: "local" | "provider";
+      readonly message: string;
+      readonly providerError?: ProviderErrorUx;
+      readonly snapshot?: AnalyzeRequestSnapshot;
+    }
+  | { readonly kind: "canceled" };
 
 const desktopWindow = window as Window & DoneCheckDesktopWindow;
 
@@ -30,15 +62,18 @@ export function App() {
   const [settings, setSettings] = useState(defaultDesktopSettings);
   const [credentialStatus, setCredentialStatus] = useState<CredentialStatus>("none");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [report, setReport] = useState<JudgementReport | undefined>();
-  const [pendingDecomposition, setPendingDecomposition] = useState<DecomposeResponse | undefined>();
+  const [analysis, setAnalysis] = useState<AnalysisState>({ kind: "ready" });
   const [history, setHistory] = useState<readonly HistorySummary[]>([]);
-  const [selectedHistoryId, setSelectedHistoryId] = useState<string | undefined>();
-  const [status, setStatus] = useState<RunState>("idle");
-  const [message, setMessage] = useState("选择 workspace 并填写需求后开始分析。");
-  const [providerError, setProviderError] = useState<
-    ReturnType<typeof classifyProviderError> | undefined
-  >();
+  const [historyLoadError, setHistoryLoadError] = useState<string>();
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string>();
+  const [notice, setNotice] = useState("");
+  const [deletedHistoryId, setDeletedHistoryId] = useState<string>();
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const activeRequestId = useRef<string>();
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const zh = settings.locale === "zh-CN";
+  const busy = analysis.kind === "decomposing" || analysis.kind === "analyzing";
+  const completed = analysis.kind === "complete" ? analysis : undefined;
 
   useEffect(() => {
     void loadSettings();
@@ -46,178 +81,243 @@ export function App() {
     void loadHistory();
   }, []);
 
+  useEffect(() => {
+    document.documentElement.lang = settings.locale;
+  }, [settings.locale]);
+
+  useEffect(() => {
+    if (!busy) return;
+    setElapsedSeconds(0);
+    const started = Date.now();
+    const timer = window.setInterval(
+      () => setElapsedSeconds(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
   const canAnalyze = useMemo(
-    () => workspaceDir.trim().length > 0 && requirement.trim().length > 0 && status !== "running",
-    [requirement, status, workspaceDir],
+    () => workspaceDir.trim().length > 0 && requirement.trim().length > 0 && !busy,
+    [busy, requirement, workspaceDir],
   );
 
   async function selectWorkspace() {
     const result = await desktopWindow.donecheck?.selectWorkspace();
-    if (result?.ok && result.data.workspaceDir !== undefined) {
+    if (result?.ok && result.data.workspaceDir) {
       setWorkspaceDir(result.data.workspaceDir);
-      await updateRecentWorkspaces(result.data.workspaceDir);
-      setMessage(`已选择 workspace：${result.data.workspaceDir}`);
-    } else if (result && !result.ok) {
-      setStatus("error");
-      setMessage(result.error.message);
+      setNotice(zh ? "已选择项目目录。" : "Project folder selected.");
+      return;
     }
+    setNotice(getDesktopOperationFeedback(settings.locale, "select-project-folder"));
   }
 
   async function analyze() {
     const api = desktopWindow.donecheck;
-    if (api === undefined) {
-      setStatus("error");
-      setMessage("preload API unavailable");
-      setProviderError(classifyProviderError("preload API unavailable"));
-      return;
-    }
-    setStatus("running");
-    setProviderError(undefined);
-    setPendingDecomposition(undefined);
-    setMessage("正在拆分需求与声明...");
-    const claimValue = claim.trim().length === 0 ? undefined : claim;
-    const result = await startAnalyzeFlow({
-      api,
-      workspaceDir,
-      requirement,
-      ...(claimValue === undefined ? {} : { claim: claimValue }),
+    if (!api) return showLocalError(getDesktopOperationFeedback(settings.locale, "app-connection"));
+    const snapshot = createAnalyzeRequestSnapshot({
+      claim,
       confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
+      locale: settings.locale,
+      requirement,
       settings: { ignore: settings.ignore, topK: settings.topK },
+      templateId: settings.templateId,
+      workspaceDir,
     });
+    activeRequestId.current = snapshot.requestId;
+    setSelectedHistoryId(undefined);
+    setNotice("");
+    setAnalysis({ kind: "decomposing", snapshot });
+    const result = await startAnalyzeFlow({ api, snapshot });
+    if (activeRequestId.current !== snapshot.requestId) return;
     if (result.kind === "review") {
-      setPendingDecomposition(result.decomposition);
-      setStatus("idle");
-      setMessage("已拆分需求与声明，请确认后继续分析。");
-      return;
+      setAnalysis({ kind: "review", decomposition: result.decomposition, snapshot });
+    } else if (result.kind === "error") {
+      activeRequestId.current = undefined;
+      showAnalyzeFlowError(result.error, snapshot);
+    } else {
+      await finalizeReport(snapshot, result.report);
     }
-    if (result.kind === "error") {
-      setStatus("error");
-      setMessage(result.error);
-      setProviderError(classifyProviderError(result.error));
-      return;
-    }
-    await finalizeReport(result.report);
   }
 
-  async function confirmDecomposition() {
+  async function confirmDecomposition(decomposition: DecomposeResponse) {
     const api = desktopWindow.donecheck;
-    if (api === undefined || pendingDecomposition === undefined) return;
-    const decomposition = pendingDecomposition;
-    setStatus("running");
-    setProviderError(undefined);
-    setMessage("正在调用 DoneCheck pipeline...");
-    const claimValue = claim.trim().length === 0 ? undefined : claim;
-    const result = await proceedAnalyze(
-      {
-        api,
-        workspaceDir,
-        requirement,
-        ...(claimValue === undefined ? {} : { claim: claimValue }),
-        confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
-        settings: { ignore: settings.ignore, topK: settings.topK },
-      },
-      decomposition,
-    );
+    if (!api || analysis.kind !== "review") return;
+    const { snapshot } = analysis;
+    activeRequestId.current = snapshot.requestId;
+    setAnalysis({ kind: "analyzing", snapshot });
+    const result = await proceedAnalyze({ api, decomposition, snapshot });
+    if (activeRequestId.current !== snapshot.requestId) return;
     if (result.kind === "error") {
-      setStatus("error");
-      setMessage(result.error);
-      setProviderError(classifyProviderError(result.error));
-      return;
+      activeRequestId.current = undefined;
+      showAnalyzeFlowError(result.error, snapshot);
+    } else {
+      await finalizeReport(snapshot, result.report);
     }
-    await finalizeReport(result.report);
   }
 
-  function cancelDecomposition() {
-    setPendingDecomposition(undefined);
-    setStatus("idle");
-    setMessage("已取消分析，未生成报告。");
+  function restartDecomposition() {
+    if (analysis.kind !== "review") return;
+    void analyzeSnapshot(analysis.snapshot);
   }
 
-  async function finalizeReport(nextReport: JudgementReport) {
-    setPendingDecomposition(undefined);
-    setReport(nextReport);
-    await updateRecentWorkspaces(workspaceDir);
-    if (settings.autoSaveHistory) {
-      await desktopWindow.donecheck?.history.save({
-        report: nextReport,
-        requirement,
-        workspaceDir,
-      });
-      await loadHistory();
+  async function analyzeSnapshot(snapshot: AnalyzeRequestSnapshot) {
+    const api = desktopWindow.donecheck;
+    if (!api) return showLocalError(getDesktopOperationFeedback(settings.locale, "app-connection"));
+    activeRequestId.current = snapshot.requestId;
+    setAnalysis({ kind: "decomposing", snapshot });
+    const result = await startAnalyzeFlow({ api, snapshot });
+    if (activeRequestId.current !== snapshot.requestId) return;
+    if (result.kind === "review")
+      setAnalysis({ kind: "review", decomposition: result.decomposition, snapshot });
+    else if (result.kind === "error") showAnalyzeFlowError(result.error, snapshot);
+    else await finalizeReport(snapshot, result.report);
+  }
+
+  function cancelAnalysis() {
+    const requestId =
+      activeRequestId.current ??
+      (analysis.kind === "review" ? analysis.snapshot.requestId : undefined);
+    activeRequestId.current = undefined;
+    setAnalysis({ kind: "canceled" });
+    setNotice(zh ? "分析已取消，未生成报告。" : "Analysis canceled. No report was created.");
+    if (requestId) void desktopWindow.donecheck?.cancelAnalysis({ requestId });
+  }
+
+  async function finalizeReport(snapshot: AnalyzeRequestSnapshot, report: JudgementReport) {
+    if (activeRequestId.current !== snapshot.requestId) return;
+    activeRequestId.current = undefined;
+    setAnalysis({ kind: "complete", report, snapshot });
+    setNotice(zh ? "分析完成。" : "Analysis complete.");
+    if (settings.autoSaveHistory) await persistHistory(snapshot, report);
+  }
+
+  async function persistHistory(
+    snapshot: AnalyzeRequestSnapshot,
+    report: JudgementReport,
+  ): Promise<boolean> {
+    const result = await desktopWindow.donecheck?.history.save({
+      report,
+      requirement: snapshot.requirement,
+      workspaceDir: snapshot.workspaceDir,
+    });
+    if (!result?.ok) {
+      setNotice(getDesktopOperationFeedback(settings.locale, "save-report"));
+      return false;
     }
-    setStatus("ready");
-    setMessage("分析完成，可预览或导出 HTML。");
+    setSelectedHistoryId(result.data.id);
+    await loadHistory();
+    return true;
+  }
+
+  async function saveHistory() {
+    if (!completed) return;
+    await saveHistoryWithFeedback({
+      locale: settings.locale,
+      persist: () => persistHistory(completed.snapshot, completed.report),
+      setNotice,
+    });
   }
 
   async function loadHistory() {
     const result = await desktopWindow.donecheck?.history.list();
     if (result?.ok) {
       setHistory(result.data);
-    } else if (result && !result.ok) {
-      setStatus("error");
-      setMessage(result.error.message);
-    }
-  }
-
-  async function saveHistory() {
-    if (report === undefined) return;
-    const result = await desktopWindow.donecheck?.history.save({
-      report,
-      requirement,
-      workspaceDir,
-    });
-    if (!result?.ok) {
-      setStatus("error");
-      setMessage(result?.error.message ?? "preload API unavailable");
+      setHistoryLoadError(undefined);
       return;
     }
-    setSelectedHistoryId(result.data.id);
-    setMessage(`已保存历史：${result.data.requirementSummary}`);
-    await loadHistory();
+    setHistoryLoadError(getDesktopOperationFeedback(settings.locale, "load-saved-reports"));
   }
 
   async function openHistory(id: string) {
     const result = await desktopWindow.donecheck?.history.get({ id });
-    if (!result?.ok) {
-      setStatus("error");
-      setMessage(result?.error.message ?? "preload API unavailable");
+    if (!result?.ok || !result.data) {
+      setNotice(
+        result?.ok
+          ? zh
+            ? "该报告已不存在。"
+            : "This report no longer exists."
+          : getDesktopOperationFeedback(settings.locale, "open-saved-report"),
+      );
       return;
     }
-    if (result.data === undefined) {
-      setMessage("历史记录不存在或已删除。");
-      await loadHistory();
-      return;
-    }
+    const snapshot = createAnalyzeRequestSnapshot({
+      confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
+      locale: settings.locale,
+      requirement: result.data.requirementSummary,
+      settings: { ignore: settings.ignore, topK: settings.topK },
+      templateId: settings.templateId,
+      workspaceDir: result.data.workspaceDir,
+    });
     setWorkspaceDir(result.data.workspaceDir);
-    setSelectedHistoryId(result.data.id);
-    setReport(result.data.report);
-    setStatus("ready");
-    setMessage(`已载入历史：${result.data.requirementSummary}`);
+    setRequirement(result.data.requirementSummary);
+    setSelectedHistoryId(id);
+    setAnalysis({ kind: "complete", report: result.data.report, snapshot });
+    setNotice(zh ? "已载入历史报告。" : "History report loaded.");
   }
 
   async function deleteHistory(id: string) {
     const result = await desktopWindow.donecheck?.history.delete({ id });
     if (!result?.ok) {
-      setStatus("error");
-      setMessage(result?.error.message ?? "preload API unavailable");
+      setNotice(getDesktopOperationFeedback(settings.locale, "update-saved-reports"));
       return;
     }
-    if (selectedHistoryId === id) setSelectedHistoryId(undefined);
-    setMessage(result.data.deleted ? "历史记录已删除。" : "历史记录不存在或已删除。");
+    if (result.data.deleted) {
+      setDeletedHistoryId(id);
+      if (selectedHistoryId === id) setSelectedHistoryId(undefined);
+      setNotice(zh ? "记录已移除，可撤销。" : "Entry removed. You can undo this action.");
+      await loadHistory();
+    }
+  }
+
+  async function restoreHistory() {
+    if (!deletedHistoryId) return;
+    const result = await desktopWindow.donecheck?.history.restore({ id: deletedHistoryId });
+    if (!result?.ok) {
+      setNotice(getDesktopOperationFeedback(settings.locale, "update-saved-reports"));
+      return;
+    }
+    setDeletedHistoryId(undefined);
+    setNotice(zh ? "记录已恢复。" : "Entry restored.");
     await loadHistory();
   }
 
   async function loadSettings() {
     const result = await desktopWindow.donecheck?.settings.get();
-    if (result?.ok) {
-      setSettings(result.data);
-      if (result.data.reopenLastWorkspace && result.data.defaultWorkspaceDir !== null) {
-        setWorkspaceDir(result.data.defaultWorkspaceDir);
-      }
-    } else if (result && !result.ok) {
-      setStatus("error");
-      setMessage(result.error.message);
+    if (!result?.ok) return;
+    setSettings(result.data);
+    if (result.data.reopenLastWorkspace && result.data.defaultWorkspaceDir)
+      setWorkspaceDir(result.data.defaultWorkspaceDir);
+  }
+
+  async function updateSettings(patch: DesktopSettingsPatch) {
+    const result = await desktopWindow.donecheck?.settings.set({ patch });
+    if (!result?.ok) return { ok: false } as const;
+    setSettings(result.data);
+    setNotice(
+      result.data.locale === "zh-CN"
+        ? "设置已保存，将用于下一次分析。"
+        : "Settings saved for the next analysis.",
+    );
+    return { ok: true } as const;
+  }
+
+  async function clearHistory() {
+    if (busy || (history.length === 0 && deletedHistoryId === undefined)) return;
+    const confirmed = window.confirm(
+      zh
+        ? "永久清空所有已保存报告？此操作无法撤销。"
+        : "Clear all saved reports permanently? This cannot be undone.",
+    );
+    if (!confirmed) return;
+    const result = await desktopWindow.donecheck?.history.clear();
+    if (!result?.ok) {
+      setNotice(getDesktopOperationFeedback(settings.locale, "update-saved-reports"));
+      return;
     }
+    setHistory([]);
+    setSelectedHistoryId(undefined);
+    setDeletedHistoryId(undefined);
+    setNotice(zh ? "历史记录已清空。" : "History cleared.");
   }
 
   async function loadCredentialStatus() {
@@ -225,216 +325,452 @@ export function App() {
     if (result?.ok) setCredentialStatus(result.data.credentialStatus);
   }
 
-  async function updateSettings(patch: DesktopSettingsPatch) {
-    const result = await desktopWindow.donecheck?.settings.set({ patch });
-    if (!result?.ok) {
-      setStatus("error");
-      setMessage(result?.error.message ?? "preload API unavailable");
-      return;
-    }
-    setSettings(result.data);
-    setMessage("设置已保存。Provider、topK、ignore 与 strict 会在下一次 Analyze 生效。");
-  }
-
-  async function resetSettings() {
-    const result = await desktopWindow.donecheck?.settings.reset();
-    if (result?.ok) {
-      setSettings(result.data);
-      setMessage("非敏感设置已重置。");
-    }
-  }
-
-  async function saveSessionApiKey(apiKey: string) {
-    const result = await desktopWindow.donecheck?.credentials.setSessionApiKey({ apiKey });
-    if (result?.ok) setCredentialStatus(result.data.credentialStatus);
-  }
-
-  async function clearSessionApiKey() {
-    const result = await desktopWindow.donecheck?.credentials.clearSessionApiKey();
-    if (result?.ok) setCredentialStatus(result.data.credentialStatus);
-  }
-
-  async function updateRecentWorkspaces(nextWorkspaceDir: string) {
-    if (nextWorkspaceDir.trim().length === 0) return;
-    await updateSettings({
-      defaultWorkspaceDir: nextWorkspaceDir,
-      recentWorkspaces: [nextWorkspaceDir, ...settings.recentWorkspaces],
-    });
-  }
-
   async function exportHtml() {
-    if (report === undefined) return;
+    if (!completed) return;
     const result = await desktopWindow.donecheck?.exportHtml({
       defaultFileName: "donecheck-report.html",
-      locale: settings.locale,
-      report,
-      templateId: settings.templateId,
+      locale: completed.snapshot.locale,
+      report: completed.report,
+      templateId: completed.snapshot.templateId,
     });
-    if (result?.ok) {
-      setMessage(
-        result.data.filePath === undefined ? "已取消导出。" : `已导出：${result.data.filePath}`,
-      );
-    } else if (result && !result.ok) {
-      setStatus("error");
-      setMessage(result.error.message);
+    if (!result?.ok) {
+      setNotice(getDesktopOperationFeedback(settings.locale, "export-report"));
+      return;
+    }
+    setNotice(
+      result.data.filePath
+        ? zh
+          ? "报告已导出。"
+          : "Report exported."
+        : zh
+          ? "已取消导出。"
+          : "Export canceled.",
+    );
+  }
+
+  async function copyCurrentRepairPrompt() {
+    if (!completed) return;
+    const feedback = await copyRepairPrompt({
+      api: desktopWindow.donecheck,
+      locale: completed.snapshot.locale,
+      report: completed.report,
+    });
+    setNotice(feedback.message);
+  }
+
+  function showAnalyzeFlowError(error: AnalyzeFlowError, snapshot?: AnalyzeRequestSnapshot) {
+    switch (error.kind) {
+      case "local-error":
+        showLocalError(error.message, snapshot);
+        return;
+      case "provider-error":
+        showProviderError(error.providerErrorKind, snapshot);
+        return;
     }
   }
+
+  function showLocalError(message: string, snapshot?: AnalyzeRequestSnapshot) {
+    setAnalysis({ kind: "error", message, source: "local", ...(snapshot ? { snapshot } : {}) });
+    setNotice(message);
+  }
+
+  function showProviderError(
+    providerErrorKind: ProviderErrorKind,
+    snapshot?: AnalyzeRequestSnapshot,
+  ) {
+    const providerError = providerErrorUxForKind(providerErrorKind);
+    const message = settings.locale === "zh-CN" ? "本次在线分析未能完成。" : providerError.summary;
+    setAnalysis({
+      kind: "error",
+      message,
+      providerError,
+      source: "provider",
+      ...(snapshot ? { snapshot } : {}),
+    });
+    setNotice(message);
+  }
+
+  const error =
+    analysis.kind === "error" && analysis.source === "provider"
+      ? analysis.providerError
+      : undefined;
+  const statusText = busy
+    ? analysis.kind === "decomposing"
+      ? zh
+        ? `正在理解需求，已用时 ${elapsedSeconds} 秒…`
+        : `Understanding requirements, ${elapsedSeconds}s elapsed…`
+      : zh
+        ? `正在检查实现，已用时 ${elapsedSeconds} 秒…`
+        : `Checking the implementation, ${elapsedSeconds}s elapsed…`
+    : getAnalysisStatusText({ canAnalyze, locale: settings.locale, notice });
 
   return (
     <main className="shell">
-      <section className="panel controls">
-        <div className="title-block">
-          <p className="eyebrow">DoneCheck Desktop</p>
-          <h1>Stage 8.5 GUI</h1>
-          <p>
-            当前 Provider mode：
-            {settings.providerMode === "mock" ? "Deterministic mock" : "OpenAI-compatible"}
-          </p>
-        </div>
-
-        <button onClick={() => setSettingsOpen(true)} type="button">
-          Settings
-        </button>
-        <SettingsPanel
-          credentialStatus={credentialStatus}
-          isOpen={settingsOpen}
-          onClearSessionApiKey={clearSessionApiKey}
-          onClose={() => setSettingsOpen(false)}
-          onSaveSessionApiKey={saveSessionApiKey}
-          onSettingsChange={updateSettings}
-          onSettingsReset={resetSettings}
-          settings={settings}
-        />
-
-        <label>
-          Workspace
-          <div className="workspace-row">
-            <input
-              onChange={(event) => setWorkspaceDir(event.currentTarget.value)}
-              placeholder="选择或粘贴 workspace 目录"
-              value={workspaceDir}
-            />
-            <button onClick={selectWorkspace} type="button">
-              选择目录
-            </button>
+      <header className="product-bar">
+        <div className="product-identity">
+          <span aria-hidden="true" className="product-mark" />
+          <div>
+            <strong>DoneCheck</strong>
+            <span>{zh ? "软件验收" : "Software verification"}</span>
           </div>
-        </label>
-
-        <label>
-          需求
-          <textarea
-            onChange={(event) => setRequirement(event.currentTarget.value)}
-            placeholder="输入原始需求"
-            rows={5}
-            value={requirement}
-          />
-        </label>
-
-        <label>
-          AI 完成说明（可选）
-          <textarea
-            onChange={(event) => setClaim(event.currentTarget.value)}
-            placeholder="输入 AI 声称已完成的内容"
-            rows={4}
-            value={claim}
-          />
-        </label>
-
-        <div className="switch-row">
-          <label>
-            Locale
-            <select
-              onChange={(event) => updateSettings({ locale: event.currentTarget.value as Locale })}
-              value={settings.locale}
-            >
-              <option value="zh-CN">中文</option>
-              <option value="en">English</option>
-            </select>
-          </label>
-          <label>
-            Template
-            <select
-              onChange={(event) =>
-                updateSettings({ templateId: event.currentTarget.value as ReportTemplateId })
-              }
-              value={settings.templateId}
-            >
-              {reportTemplates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.id}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
-
-        <div className="actions">
-          <button disabled={!canAnalyze} onClick={analyze} type="button">
-            {status === "running" ? "分析中..." : "开始分析"}
-          </button>
-          <button disabled={report === undefined} onClick={exportHtml} type="button">
-            导出 HTML
-          </button>
-          <button disabled={report === undefined} onClick={saveHistory} type="button">
-            保存历史
-          </button>
-          <button onClick={loadHistory} type="button">
-            刷新历史
-          </button>
-        </div>
-        {pendingDecomposition === undefined ? null : (
-          <DecompositionReviewPanel
-            decomposition={pendingDecomposition}
-            onCancel={cancelDecomposition}
-            onConfirm={confirmDecomposition}
-          />
-        )}
-        <p className={`status ${status}`}>{message}</p>
-        {providerError === undefined ? null : (
-          <ProviderErrorNotice error={providerError} onOpenSettings={() => setSettingsOpen(true)} />
-        )}
-        <section className="history-list">
-          <h2>历史记录</h2>
-          {history.length === 0 ? (
-            <p className="history-empty">暂无历史。保存报告后可在这里回看。</p>
-          ) : (
-            <ul>
-              {history.map((entry) => (
-                <li key={entry.id}>
-                  <button
-                    className={
-                      entry.id === selectedHistoryId ? "history-item selected" : "history-item"
-                    }
-                    onClick={() => openHistory(entry.id)}
-                    type="button"
-                  >
-                    <strong>{entry.requirementSummary}</strong>
-                    <span>{entry.workspaceDir}</span>
-                    <time>{entry.createdAt}</time>
-                  </button>
-                  <button className="danger" onClick={() => deleteHistory(entry.id)} type="button">
-                    删除
-                  </button>
-                </li>
-              ))}
-            </ul>
+        <button
+          aria-haspopup="dialog"
+          className="utility-button"
+          ref={settingsButton}
+          disabled={busy}
+          onClick={() => setSettingsOpen(true)}
+          type="button"
+        >
+          {zh ? "设置" : "Settings"}
+        </button>
+      </header>
+      <SettingsPanel
+        credentialStatus={credentialStatus}
+        isOpen={settingsOpen}
+        locale={settings.locale}
+        onClearSessionApiKey={async () => {
+          const result = await desktopWindow.donecheck?.credentials.clearSessionApiKey();
+          if (!result?.ok) return { ok: false };
+          setCredentialStatus(result.data.credentialStatus);
+          return { ok: true };
+        }}
+        onClose={() => {
+          setSettingsOpen(false);
+          window.setTimeout(() => settingsButton.current?.focus(), 0);
+        }}
+        onSaveSessionApiKey={async (apiKey) => {
+          const result = await desktopWindow.donecheck?.credentials.setSessionApiKey({ apiKey });
+          if (!result?.ok) return { ok: false };
+          setCredentialStatus(result.data.credentialStatus);
+          return { ok: true };
+        }}
+        onSettingsChange={updateSettings}
+        onSettingsReset={async () => {
+          const result = await desktopWindow.donecheck?.settings.reset();
+          if (result?.ok) {
+            setSettings(result.data);
+            return { ok: true };
+          }
+          return { ok: false };
+        }}
+        settings={settings}
+      />
+      <div className="workspace-layout">
+        <aside className="panel workspace-rail" aria-busy={busy}>
+          <div className="rail-intro">
+            <p className="eyebrow">{zh ? "新的检查" : "New verification"}</p>
+            <h1>{zh ? "从需求开始" : "Start with the requirement"}</h1>
+            <p>
+              {zh
+                ? "选择项目目录并说明要验收的行为。"
+                : "Choose a project folder and describe the behavior to verify."}
+            </p>
+          </div>
+          <section aria-label={zh ? "检查输入" : "Verification input"} className="input-stack">
+            <label>
+              {zh ? "项目目录" : "Project folder"}
+              <div className="workspace-row">
+                <input
+                  disabled={busy}
+                  onChange={(event) =>
+                    applyUserInput({
+                      setNotice,
+                      setValue: setWorkspaceDir,
+                      value: event.currentTarget.value,
+                    })
+                  }
+                  placeholder={zh ? "选择或粘贴项目目录" : "Select or paste a project folder"}
+                  value={workspaceDir}
+                />
+                <button disabled={busy} onClick={selectWorkspace} type="button">
+                  {zh ? "选择目录" : "Browse"}
+                </button>
+              </div>
+            </label>
+            <label>
+              {zh ? "需要验收的需求" : "Requirement to verify"}
+              <textarea
+                disabled={busy}
+                onChange={(event) =>
+                  applyUserInput({
+                    setNotice,
+                    setValue: setRequirement,
+                    value: event.currentTarget.value,
+                  })
+                }
+                placeholder={
+                  zh
+                    ? "描述预期功能和验收标准"
+                    : "Describe expected behavior and acceptance criteria"
+                }
+                rows={5}
+                value={requirement}
+              />
+            </label>
+            <label>
+              {zh ? "完成说明（可选）" : "Completion claim (optional)"}
+              <textarea
+                disabled={busy}
+                onChange={(event) =>
+                  applyUserInput({
+                    setNotice,
+                    setValue: setClaim,
+                    value: event.currentTarget.value,
+                  })
+                }
+                placeholder={zh ? "粘贴完成说明" : "Paste the completion summary"}
+                rows={3}
+                value={claim}
+              />
+            </label>
+          </section>
+          <div className="switch-row">
+            <label>
+              {zh ? "界面语言" : "Language"}
+              <select
+                disabled={busy}
+                onChange={(event) =>
+                  void updateSettings({ locale: event.currentTarget.value as Locale })
+                }
+                value={settings.locale}
+              >
+                <option value="zh-CN">中文</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label>
+              {zh ? "报告类型" : "Report type"}
+              <select
+                disabled={busy}
+                onChange={(event) =>
+                  void updateSettings({ templateId: event.currentTarget.value as ReportTemplateId })
+                }
+                value={settings.templateId}
+              >
+                {reportTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {templateLabel(template.id, zh)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="rail-actions">
+            <button className="primary" disabled={!canAnalyze} onClick={analyze} type="button">
+              {zh ? "开始分析" : "Start analysis"}
+            </button>
+            {busy && (
+              <button className="danger" onClick={cancelAnalysis} type="button">
+                {zh ? "取消分析" : "Cancel analysis"}
+              </button>
+            )}
+          </div>
+          <p
+            aria-live="polite"
+            className={`status ${analysis.kind === "error" ? "error" : completed ? "ready" : busy ? "running" : "idle"}`}
+          >
+            <span className="status-label">
+              {analysis.kind === "error"
+                ? zh
+                  ? "需要处理"
+                  : "Action needed"
+                : completed
+                  ? zh
+                    ? "分析完成"
+                    : "Analysis complete"
+                  : busy
+                    ? zh
+                      ? "正在分析"
+                      : "Analyzing"
+                    : zh
+                      ? "准备就绪"
+                      : "Ready"}
+            </span>
+            <span>
+              {statusText}
+              {busy && elapsedSeconds >= 20
+                ? zh
+                  ? " 分析响应较慢，可继续等待或取消。"
+                  : " Analysis is taking longer than usual; you can wait or cancel."
+                : ""}
+            </span>
+          </p>
+          <section className="history-list" aria-labelledby="history-title">
+            <div className="history-heading">
+              <div>
+                <p className="eyebrow">{zh ? "历史记录" : "History"}</p>
+                <h2 id="history-title">{zh ? "已保存报告" : "Saved reports"}</h2>
+              </div>
+              <button
+                className="text-button"
+                disabled={busy || (history.length === 0 && deletedHistoryId === undefined)}
+                onClick={() => void clearHistory()}
+                type="button"
+              >
+                {zh ? "清空" : "Clear"}
+              </button>
+            </div>
+            {deletedHistoryId && (
+              <button className="secondary history-undo" onClick={restoreHistory} type="button">
+                {zh ? "撤销移除" : "Undo remove"}
+              </button>
+            )}
+            {history.length === 0 ? (
+              <p className="history-empty">{zh ? "暂无已保存报告。" : "No saved reports yet."}</p>
+            ) : (
+              <ul>
+                {history.map((entry) => (
+                  <li key={entry.id}>
+                    <button
+                      className={
+                        entry.id === selectedHistoryId ? "history-item selected" : "history-item"
+                      }
+                      disabled={busy}
+                      onClick={() => openHistory(entry.id)}
+                      type="button"
+                    >
+                      <strong>{entry.requirementSummary}</strong>
+                      <time dateTime={entry.createdAt} title={entry.createdAt}>
+                        {new Intl.DateTimeFormat(settings.locale, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(entry.createdAt))}
+                      </time>
+                    </button>
+                    <button
+                      aria-label={zh ? "移除已保存报告" : "Remove saved report"}
+                      className="danger quiet"
+                      disabled={busy}
+                      onClick={() => deleteHistory(entry.id)}
+                      type="button"
+                    >
+                      {zh ? "移除" : "Remove"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {historyLoadError && (
+              <div className="history-error" role="alert">
+                <p>{historyLoadError}</p>
+                <button disabled={busy} onClick={loadHistory} type="button">
+                  {zh ? "重试" : "Retry"}
+                </button>
+              </div>
+            )}
+          </section>
+        </aside>
+        <section className="review-canvas" aria-label={zh ? "检查结果" : "Verification result"}>
+          <header className="review-header">
+            <div>
+              <p className="eyebrow">{zh ? "结果工作区" : "Review workspace"}</p>
+              <h2>
+                {completed
+                  ? zh
+                    ? "分析报告"
+                    : "Analysis report"
+                  : analysis.kind === "review"
+                    ? zh
+                      ? "确认检查范围"
+                      : "Confirm the review scope"
+                    : zh
+                      ? "等待开始"
+                      : "Ready when you are"}
+              </h2>
+            </div>
+            {completed && (
+              <div className="report-actions" aria-label={zh ? "报告操作" : "Report actions"}>
+                <button disabled={busy} onClick={exportHtml} type="button">
+                  {zh ? "导出" : "Export"}
+                </button>
+                <button
+                  disabled={
+                    busy ||
+                    !completed.report.consolidatedRepairPrompt.content[
+                      completed.snapshot.locale
+                    ].trim()
+                  }
+                  onClick={copyCurrentRepairPrompt}
+                  type="button"
+                >
+                  {zh ? "复制修复建议" : "Copy fix instructions"}
+                </button>
+                <button disabled={busy} onClick={saveHistory} type="button">
+                  {zh ? "保存报告" : "Save report"}
+                </button>
+              </div>
+            )}
+          </header>
+          {analysis.kind === "review" && (
+            <DecompositionReviewPanel
+              decomposition={analysis.decomposition}
+              locale={analysis.snapshot.locale}
+              onCancel={cancelAnalysis}
+              onConfirm={confirmDecomposition}
+              onRestart={restartDecomposition}
+            />
           )}
+          {error && <ProviderErrorNotice error={error} locale={settings.locale} />}
+          {analysis.kind === "error" && analysis.source === "provider" && (
+            <div className="recovery-actions">
+              <button
+                className="primary"
+                disabled={!analysis.snapshot}
+                onClick={() => analysis.snapshot && void analyzeSnapshot(analysis.snapshot)}
+                type="button"
+              >
+                {zh ? "重试" : "Retry"}
+              </button>
+              <button onClick={() => setSettingsOpen(true)} type="button">
+                {zh ? "检查设置" : "Check settings"}
+              </button>
+            </div>
+          )}
+          {completed ? (
+            <article className="panel report-surface">
+              <ReportPreview
+                locale={completed.snapshot.locale}
+                report={completed.report}
+                templateId={completed.snapshot.templateId}
+              />
+            </article>
+          ) : analysis.kind !== "review" ? (
+            <div className="empty-state">
+              <div>
+                <span aria-hidden="true" className="empty-mark" />
+                <h3>
+                  {busy
+                    ? zh
+                      ? "正在准备可审查的证据"
+                      : "Preparing evidence you can review"
+                    : zh
+                      ? "分析完成后，报告会显示在这里。"
+                      : "Your report will appear here after analysis."}
+                </h3>
+                <p>
+                  {busy
+                    ? zh
+                      ? "你可以继续等待，或在左侧安全地取消本次分析。"
+                      : "You can wait here or safely cancel this analysis from the left rail."
+                    : zh
+                      ? "填写左侧信息后开始分析。"
+                      : "Complete the input on the left to begin."}
+                </p>
+              </div>
+            </div>
+          ) : null}
         </section>
-      </section>
-
-      <section
-        className={settings.showDebugSections ? "panel preview" : "panel preview hide-debug"}
-      >
-        {report === undefined ? (
-          <div className="empty-state">暂无报告。分析完成后将在这里展示 JudgementReport。</div>
-        ) : (
-          <ReportPreview
-            locale={settings.locale}
-            report={report}
-            templateId={settings.templateId}
-          />
-        )}
-      </section>
+      </div>
     </main>
   );
+}
+
+function templateLabel(templateId: ReportTemplateId, zh: boolean): string {
+  const labels: Record<ReportTemplateId, readonly [string, string]> = {
+    frontend: ["前端检查", "Frontend check"],
+    generic: ["通用检查", "General check"],
+    todo: ["待办检查", "Task check"],
+  };
+  return labels[templateId][zh ? 0 : 1];
 }

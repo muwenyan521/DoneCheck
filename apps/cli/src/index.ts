@@ -1,7 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
 import type { LLMProvider } from "@donecheck/core";
-import { analyze, runDoneCheckPipelineNode } from "@donecheck/core";
+import {
+  WorkspaceValidationError,
+  analyze,
+  runDoneCheckPipelineNode,
+  validateWorkspace,
+} from "@donecheck/core";
 import { decomposeRequirements } from "@donecheck/core/semantic";
 import { ProviderConfigError } from "@donecheck/provider-openai";
 import { parseArgs } from "./args.js";
@@ -24,6 +29,10 @@ export interface CliRuntime {
 }
 
 export async function runCli(runtime: CliRuntime): Promise<number> {
+  if (runtime.argv.includes("--help")) {
+    runtime.stdout(helpText);
+    return 0;
+  }
   const options = parseArgs(runtime.argv);
   if (!options.ok) {
     runtime.stderr(`${options.error}\n`);
@@ -48,12 +57,15 @@ export async function runCli(runtime: CliRuntime): Promise<number> {
   }
 
   try {
+    const workspacePath = opts.workspace ?? process.cwd();
+    await validateWorkspace(workspacePath);
     const provider =
       runtime.provider ??
       createProvider({
         ...(opts.mock ? { mock: true } : {}),
         stderr: runtime.stderr,
       });
+    runtime.stderr("Analyzing requirements...\n");
     const decomposition = await decomposeRequirements({
       claim: input.value.evidence,
       provider,
@@ -63,13 +75,14 @@ export async function runCli(runtime: CliRuntime): Promise<number> {
       const confirmed = await confirmRequirementDecomposition(runtime, decomposition);
       if (!confirmed.ok) return toolErrorExitCode;
     }
+    runtime.stderr("Reviewing workspace evidence...\n");
     const result = await runDoneCheckPipelineNode({
       claim: input.value.evidence,
       claims: decomposition.claims,
       provider,
       requirement: input.value.requirement,
       requirements: decomposition.requirements,
-      workspacePath: opts.workspace ?? process.cwd(),
+      workspacePath,
     });
     if (opts.html) {
       const html = formatHtml(result.report);
@@ -81,14 +94,22 @@ export async function runCli(runtime: CliRuntime): Promise<number> {
     } else {
       runtime.stdout(formatRulesJson(result.report));
     }
-    return opts.rules ? 0 : exitCodeForJudgementReport(result.report, opts.partialOk);
+    return exitCodeForJudgementReport(result.report, opts.partialOk);
   } catch (error) {
-    if (!(error instanceof ProviderConfigError)) {
-      runtime.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    if (error instanceof WorkspaceValidationError) {
+      runtime.stderr(`${error.message}\n`);
+    } else if (!(error instanceof ProviderConfigError)) {
+      runtime.stderr(publicServiceErrorMessage);
     }
     return toolErrorExitCode;
   }
 }
+
+const helpText =
+  "DoneCheck\n\nUsage:\n  donecheck --requirement <text>|--requirement-file <path> [--evidence <text>|--evidence-file <path>] [options]\n\nOptions:\n  --workspace <path>       Analyze a local source directory.\n  --rules                  Print a detailed JSON report.\n  --html                   Render a self-contained HTML report.\n  --output <path>          Write HTML output (requires --html).\n  --mock                   Use local demo data without contacting an analysis service.\n  --partial-ok             Return 0 for reports containing only partial or insufficient evidence.\n  --confirm-requirements   Review the detected requirements in an interactive terminal.\n  --text-only              Check requirement and evidence text without reading a workspace.\n  --json                   Print text-only checker output as JSON (requires --text-only).\n  --help                   Show this help.\n";
+
+const publicServiceErrorMessage =
+  "The analysis service could not complete the request. Try again later or check the service settings.\n";
 
 interface ConfirmResult {
   readonly ok: boolean;
@@ -98,14 +119,14 @@ async function confirmRequirementDecomposition(
   runtime: CliRuntime,
   decomposition: Awaited<ReturnType<typeof decomposeRequirements>>,
 ): Promise<ConfirmResult> {
-  runtime.stderr("Decomposed requirements:\n");
+  runtime.stderr("Detected requirements:\n");
   for (const requirement of decomposition.requirements) {
-    runtime.stderr(`  ${requirement.id}: ${requirement.text}\n`);
+    runtime.stderr(`  - ${requirement.text}\n`);
   }
   if (decomposition.claims.length > 0) {
-    runtime.stderr("Decomposed claims:\n");
+    runtime.stderr("Detected completion claims:\n");
     for (const claim of decomposition.claims) {
-      runtime.stderr(`  ${claim.id}: ${claim.text}\n`);
+      runtime.stderr(`  - ${claim.text}\n`);
     }
   }
   if (decomposition.assumptions.length > 0) {
@@ -122,10 +143,10 @@ async function confirmRequirementDecomposition(
     runtime.stderr("Requirement confirmation requires an interactive TTY.\n");
     return { ok: false };
   }
-  runtime.stderr("Continue with these decomposed requirements? [y/N] ");
+  runtime.stderr("Continue with these items? [y/N] ");
   const answer = (await runtime.readLine()).trim();
   if (answer === "y" || answer === "Y") return { ok: true };
-  runtime.stderr("Requirement decomposition rejected.\n");
+  runtime.stderr("Requirement review canceled.\n");
   return { ok: false };
 }
 
@@ -138,8 +159,8 @@ async function readProcessStdin(): Promise<string> {
 }
 
 if (isMainModule()) {
-  runProcessCli().catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  runProcessCli().catch(() => {
+    process.stderr.write(publicServiceErrorMessage);
     process.exitCode = toolErrorExitCode;
   });
 }

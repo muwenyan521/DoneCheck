@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,7 +7,11 @@ import type {
   GenerateObjectResult,
   LLMProvider,
 } from "../semantic/provider.js";
-import { runDoneCheckPipelineNode } from "./node-adapter.js";
+import {
+  WorkspaceValidationError,
+  runDoneCheckPipelineNode,
+  validateWorkspace,
+} from "./node-adapter.js";
 
 const stubProvider: LLMProvider = {
   async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
@@ -52,7 +56,50 @@ describe("runDoneCheckPipelineNode workspace scan", () => {
   });
 
   afterEach(() => {
+    try {
+      chmodSync(workspace, 0o700);
+    } catch {}
     rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("rejects empty, missing, file, unreadable, empty, and non-analyzable workspaces", async () => {
+    await expect(validateWorkspace("   ")).rejects.toBeInstanceOf(WorkspaceValidationError);
+    await expect(validateWorkspace(join(workspace, "missing"))).rejects.toMatchObject({
+      code: "workspace-missing",
+    });
+    writeFileSync(join(workspace, "file.ts"), "export {};");
+    await expect(validateWorkspace(join(workspace, "file.ts"))).rejects.toMatchObject({
+      code: "workspace-not-directory",
+    });
+    const empty = join(workspace, "empty");
+    mkdirSync(empty);
+    await expect(validateWorkspace(empty)).rejects.toMatchObject({ code: "workspace-empty" });
+    const nonAnalyzable = join(workspace, "non-analyzable");
+    mkdirSync(nonAnalyzable);
+    writeFileSync(join(nonAnalyzable, "image.png"), "not analyzable");
+    await expect(validateWorkspace(nonAnalyzable)).rejects.toMatchObject({
+      code: "workspace-no-analyzable-files",
+    });
+    mkdirSync(join(workspace, "blocked"));
+    chmodSync(join(workspace, "blocked"), 0o000);
+    await expect(validateWorkspace(join(workspace, "blocked"))).rejects.toMatchObject({
+      code: "workspace-unreadable",
+    });
+    chmodSync(join(workspace, "blocked"), 0o700);
+  });
+
+  it("validates before invoking the provider", async () => {
+    let calls = 0;
+    const provider: LLMProvider = {
+      generateObject: async () => {
+        calls += 1;
+        throw new Error("called");
+      },
+    };
+    await expect(
+      runDoneCheckPipelineNode({ workspacePath: workspace, requirement: "x", provider }),
+    ).rejects.toBeInstanceOf(WorkspaceValidationError);
+    expect(calls).toBe(0);
   });
 
   it("does not infinite-loop on symlink cycles", async () => {

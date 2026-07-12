@@ -164,8 +164,8 @@ describe("reportTemplateSchema / parseReportTemplate", () => {
     },
     id: "generic",
     layout: {
-      defaultCollapsedSections: ["debug"],
-      sections: ["overview", "judgements", "debug"],
+      defaultCollapsedSections: [],
+      sections: ["overview", "judgements"],
     },
     nameKey: "template.generic.name",
     scenarios: ["generic"],
@@ -259,6 +259,11 @@ describe("stage 4 report contracts", () => {
         score: 0,
         totalItems: 1,
         weightedFulfilled: 0,
+      },
+      consolidatedRepairPrompt: {
+        content: { "zh-CN": "修复 claim:claim-fake。", en: "Repair claim:claim-fake." },
+        includedJudgementIds: ["claim:claim-fake"],
+        version: "repair-v1",
       },
       generatedAt: "2026-06-27T00:00:00.000Z",
       judgements: [validJudgement],

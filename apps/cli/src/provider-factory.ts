@@ -16,7 +16,9 @@ export interface CreateProviderOptions {
 export function createProvider(options: CreateProviderOptions = {}): CliProvider {
   if (options.mock === true) {
     const sink = options.stderr ?? ((s: string) => process.stderr.write(s));
-    sink("Using deterministic mock provider (--mock). Results are not real analysis.\n");
+    sink(
+      "Using local demo mode (--mock). Results are generated sample data, not an external analysis.\n",
+    );
     return createDeterministicMockProvider();
   }
   return createOpenAIProvider(options.stderr === undefined ? {} : { stderr: options.stderr });

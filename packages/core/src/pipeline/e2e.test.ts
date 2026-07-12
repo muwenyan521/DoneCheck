@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type {
@@ -9,6 +10,18 @@ import type {
 import { runDoneCheckPipelineNode } from "./node-adapter.js";
 
 const FIXTURE_DIR = resolve(fileURLToPath(import.meta.url), "..", "__fixtures__", "sample-project");
+const TODO_FIXTURE_DIR = resolve(
+  fileURLToPath(import.meta.url),
+  "..",
+  "..",
+  "..",
+  "..",
+  "..",
+  "fixtures",
+  "todo-fake-completion",
+  "workspace",
+);
+const TODO_FIXTURE_INPUT_DIR = resolve(TODO_FIXTURE_DIR, "..", "inputs");
 
 const stubProvider: LLMProvider = {
   async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
@@ -216,7 +229,7 @@ describe("e2e: full pipeline over sample-project fixture", () => {
     expect(semanticCalls.length).toBeLessThan(10);
     expect(new Set(ids).size).toBe(result.report.judgements.length);
     expect(refs.map((ref) => ref.filePath)).not.toEqual(
-      expect.arrayContaining(["README.md", "requirements.md", "claim.md"]),
+      expect.arrayContaining(["README.md", "requirements.md", "claims.md"]),
     );
     expect(
       result.report.judgements.find((judgement) => judgement.id === "requirement:REQ-1")
@@ -228,4 +241,137 @@ describe("e2e: full pipeline over sample-project fixture", () => {
     ).toBe("suspicious");
     expect(result.report.scopeDrift.extraScopeCount).toBeGreaterThan(0);
   });
+
+  it("detects the todo fake-completion fixture through the formal pipeline", async () => {
+    const requirements = parseFixtureItems(
+      readFileSync(join(TODO_FIXTURE_INPUT_DIR, "requirements.md"), "utf8"),
+      "REQ",
+    );
+    const claims = readFileSync(join(TODO_FIXTURE_INPUT_DIR, "claims.md"), "utf8");
+    expect(claims).toContain(
+      "已完成所有功能，包括任务新增、任务删除、标记完成、localStorage 数据保存和响应式布局。",
+    );
+    expect(claims).toContain("另外实现了登录入口和导出功能。");
+    const provider: LLMProvider = {
+      async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+        if (input.schemaName === "FileSelectionModelOutput") {
+          return {
+            object: input.schema.parse({
+              candidateFiles: [
+                "src/components/LoginPage.tsx",
+                "src/components/TodoApp.tsx",
+                "src/components/ExportButton.tsx",
+                "src/styles.css",
+              ],
+              confidence: 0.9,
+              reasoningSummary: "source files relevant to explicit requirements",
+              warnings: [],
+            }) as T,
+            metadata: { provider: "fixture", model: "deterministic", retries: 0 },
+            usage: {},
+          };
+        }
+
+        const payload = JSON.parse(input.prompt.user) as {
+          evidenceSnippets: { filePath: string; lineEnd: number; lineStart: number }[];
+          requirement: { id: string };
+        };
+        const sourcePath = {
+          "REQ-ADD": "src/components/TodoApp.tsx",
+          "REQ-COMPLETE": "src/components/TodoApp.tsx",
+          "REQ-DELETE": "src/components/TodoApp.tsx",
+          "REQ-MOBILE": "src/components/TodoApp.tsx",
+          "REQ-PERSIST": "src/components/TodoApp.tsx",
+        }[payload.requirement.id];
+        if (sourcePath === undefined) {
+          throw new Error(`Unexpected requirement ${payload.requirement.id}`);
+        }
+        const ref = payload.evidenceSnippets.find((snippet) => snippet.filePath === sourcePath);
+        if (ref === undefined) throw new Error(`Missing selected evidence for ${sourcePath}`);
+        const judgementDraft =
+          payload.requirement.id === "REQ-MOBILE" || payload.requirement.id === "REQ-PERSIST"
+            ? "unsupported"
+            : payload.requirement.id === "REQ-DELETE"
+              ? "partial"
+              : "fulfilled";
+        return {
+          object: input.schema.parse({
+            confidence: 0.9,
+            evidenceRefs: [
+              {
+                filePath: ref.filePath,
+                lineEnd: ref.lineEnd,
+                lineStart: ref.lineStart,
+                snippetSummary: `${payload.requirement.id} source evidence`,
+              },
+            ],
+            explanation: `${payload.requirement.id} semantic assessment`,
+            judgementDraft,
+            matchedRequirementId: payload.requirement.id,
+            ...(payload.requirement.id === "REQ-ADD"
+              ? { possibleExtraScope: ["实现了需求范围外的登录和导出功能。"] }
+              : {}),
+            repairSuggestion: "Use the reported evidence to repair this item.",
+          }) as T,
+          metadata: { provider: "fixture", model: "deterministic", retries: 0 },
+          usage: {},
+        };
+      },
+    };
+    const result = await runDoneCheckPipelineNode({
+      workspacePath: TODO_FIXTURE_DIR,
+      requirement: "Todo fixture requirements",
+      requirements,
+      provider,
+      generatedAt: "2026-07-11T00:00:00.000Z",
+    });
+
+    expect(result.report.summaryStats["suspicious-fake-implementation"]).toBe(0);
+    expect(result.report.judgements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          finalStatus: "partial",
+          id: "requirement:REQ-ADD",
+          reasonCode: "semantic-fulfilled-with-incomplete-evidence",
+        }),
+        expect.objectContaining({
+          finalStatus: "partial",
+          id: "requirement:REQ-DELETE",
+          reasonCode: "semantic-partial-with-supporting-evidence",
+        }),
+        expect.objectContaining({
+          finalStatus: "partial",
+          id: "requirement:REQ-COMPLETE",
+          reasonCode: "semantic-fulfilled-with-incomplete-evidence",
+        }),
+        expect.objectContaining({
+          finalStatus: "unfulfilled",
+          id: "requirement:REQ-MOBILE",
+          reasonCode: "semantic-unsupported-without-static-support",
+        }),
+        expect.objectContaining({
+          finalStatus: "unfulfilled",
+          id: "requirement:REQ-PERSIST",
+          reasonCode: "semantic-unsupported-without-static-support",
+        }),
+        expect.objectContaining({
+          finalStatus: "extra-scope",
+          id: "extra-scope:extra-code-REQ-ADD-0",
+          reasonCode: "extra-scope-detected",
+        }),
+      ]),
+    );
+
+    expect(result.fakeImplementationSignals.map((signal) => signal.pattern)).toEqual(
+      expect.arrayContaining(["alert-only", "empty-handler"]),
+    );
+  });
 });
+
+function parseFixtureItems(markdown: string, prefix: "CLAIM" | "REQ") {
+  return markdown.split(/\r?\n/u).flatMap((line) => {
+    const match = new RegExp(`^(${prefix}-[A-Z-]+):\\s+(.+)$`, "u").exec(line);
+    const [id, text] = match?.slice(1) ?? [];
+    return id === undefined || text === undefined ? [] : [{ id, text }];
+  });
+}

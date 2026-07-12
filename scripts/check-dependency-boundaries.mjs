@@ -241,7 +241,11 @@ async function checkSourceFiles() {
       const owner = packageForFile(file);
       if (!owner) continue;
 
-      const content = await readFile(file, "utf8");
+      const content = await readFile(file, "utf8").catch((error) => {
+        if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (content === undefined) continue;
       const refs = extractDonecheckReferences(file, content);
       const runtimeAllowed = allowedRuntimeImports.get(owner) ?? new Set();
       const typeOnlyAllowed = allowedTypeOnlyImports.get(owner) ?? new Set();

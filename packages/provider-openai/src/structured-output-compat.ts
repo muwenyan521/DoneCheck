@@ -1,5 +1,5 @@
-import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 export interface NormalizationGuide {
   readonly nullableFields: ReadonlySet<string>;
@@ -8,21 +8,32 @@ export interface NormalizationGuide {
 }
 
 export interface StrictCompatSchema {
-  readonly responseFormat: ReturnType<typeof zodResponseFormat>;
+  readonly responseFormat: ParseableResponseFormat;
   readonly guide: NormalizationGuide;
 }
 
 type JsonSchema = Record<string, unknown>;
+
+interface ParseableResponseFormat {
+  readonly type: "json_schema";
+  readonly json_schema: {
+    readonly name: string;
+    readonly strict: boolean;
+    readonly schema: JsonSchema;
+  };
+}
 
 export function buildStrictCompatResponseFormat<T>(
   schema: z.ZodType<T>,
   schemaName: string,
   strict: boolean,
 ): StrictCompatSchema {
-  const base = silentZodResponseFormat(schema, schemaName);
   const guide = buildGuide(schema);
   const transformedSchema = transformJsonSchema(
-    deepClone(base.json_schema.schema as JsonSchema),
+    zodToJsonSchema(schema, {
+      $refStrategy: "none",
+      target: "openAi",
+    }) as JsonSchema,
     guide,
   );
   const responseFormat = makeParseable(
@@ -58,19 +69,6 @@ export function normalizeProviderOutput(parsed: unknown, guide: NormalizationGui
     }
   }
   return result;
-}
-
-function silentZodResponseFormat<T>(
-  schema: z.ZodType<T>,
-  name: string,
-): ReturnType<typeof zodResponseFormat> {
-  const originalWarn = console.warn;
-  console.warn = () => {};
-  try {
-    return zodResponseFormat(schema, name);
-  } finally {
-    console.warn = originalWarn;
-  }
 }
 
 function buildGuide(schema: z.ZodType): NormalizationGuide {
@@ -162,6 +160,13 @@ function transformJsonSchema(jsonSchema: JsonSchema, guide: NormalizationGuide):
 }
 
 function makeNullable(jsonSchema: JsonSchema): JsonSchema {
+  if (Array.isArray(jsonSchema.anyOf)) {
+    const variants = jsonSchema.anyOf as JsonSchema[];
+    const nonNull = variants.find((variant) => variant.type !== "null");
+    if (nonNull !== undefined && variants.some((variant) => variant.type === "null")) {
+      return makeNullable(nonNull);
+    }
+  }
   const result = { ...jsonSchema };
   // biome-ignore lint/performance/noDelete: JSON schema output must not include default
   delete result.default;
@@ -177,18 +182,13 @@ function makeNullable(jsonSchema: JsonSchema): JsonSchema {
   return result;
 }
 
-function deepClone<T>(value: T): T {
-  if (typeof structuredClone === "function") return structuredClone(value);
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
 function makeParseable(
   responseFormat: Record<string, unknown>,
   parseFn: (content: string) => unknown,
-): ReturnType<typeof zodResponseFormat> {
+): ParseableResponseFormat {
   Object.defineProperties(responseFormat, {
     $brand: { value: "auto-parseable-response-format", enumerable: false },
     $parseRaw: { value: parseFn, enumerable: false },
   });
-  return responseFormat as unknown as ReturnType<typeof zodResponseFormat>;
+  return responseFormat as unknown as ParseableResponseFormat;
 }

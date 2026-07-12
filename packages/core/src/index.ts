@@ -1,6 +1,5 @@
 import {
   type CheckResult,
-  DONECHECK_SCHEMA_VERSION,
   type DoneCheckResult,
   type Evidence,
   type Requirement,
@@ -51,7 +50,7 @@ export function analyze(input: AnalyzeInput): DoneCheckResult {
     checkResults,
     score,
     status,
-    summary: `DoneCheck ${DONECHECK_SCHEMA_VERSION}: ${passedCount} checks passed, ${partialCount} partial, ${failedCount} failed. Overall score ${Math.round(score * 100)}%.`,
+    summary: `DoneCheck: ${passedCount} checks passed, ${partialCount} partial, ${failedCount} failed. Overall score ${Math.round(score * 100)}%.`,
   });
 }
 

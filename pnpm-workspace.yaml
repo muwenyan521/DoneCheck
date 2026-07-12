@@ -24,7 +24,7 @@ catalog:
   "husky": "9.1.6"
   "license-checker": "25.0.1"
   "lint-staged": "15.2.10"
-  "openai": "^4.67.0"
+  "openai": "^5.23.2"
   "react": "18.3.1"
   "react-dom": "18.3.1"
   "tsup": "8.3.5"
@@ -33,3 +33,4 @@ catalog:
   "undici": "^7.28.0"
   "vitest": "2.1.5"
   "zod": "3.23.8"
+  "zod-to-json-schema": "3.24.6"

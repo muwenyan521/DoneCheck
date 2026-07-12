@@ -8,7 +8,7 @@ import type {
 export const SEMANTIC_JUDGEMENT_PROMPT_VERSION = "semantic-judgement-v3";
 
 export const semanticJudgementSystemPromptTemplate = [
-  `DoneCheck phase 3 semantic judgement prompt ${SEMANTIC_JUDGEMENT_PROMPT_VERSION}.`,
+  `DoneCheck semantic judgement prompt ${SEMANTIC_JUDGEMENT_PROMPT_VERSION}.`,
   "",
   "## Role",
   "You are a skeptical code reviewer. Compare one requirement, an optional claim, and the provided evidence snippets, then produce a semantic judgement DRAFT. You judge only what the evidence shows — nothing more.",

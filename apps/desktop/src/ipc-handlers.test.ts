@@ -52,6 +52,39 @@ const realPipelineProvider: LLMProvider = {
   },
 };
 
+const semanticFailureProvider: LLMProvider = {
+  async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+    if (input.schemaName === "FileSelectionModelOutput") {
+      return {
+        object: input.schema.parse({ candidateFiles: ["src/login.ts"] }) as T,
+        metadata: { provider: "desktop-ipc-test", model: "stub", retries: 0 },
+        usage: {},
+      };
+    }
+    throw new Error(
+      "502 Upstream request failed Authorization: Bearer test-secret-value https://service.test/v1?token=query-secret",
+    );
+  },
+};
+
+const codedSemanticFailureProvider: LLMProvider = {
+  async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+    if (input.schemaName === "FileSelectionModelOutput") {
+      return {
+        object: input.schema.parse({ candidateFiles: ["src/login.ts"] }) as T,
+        metadata: { provider: "desktop-ipc-test", model: "stub", retries: 0 },
+        usage: {},
+      };
+    }
+    throw Object.assign(
+      new Error(
+        "502 Upstream request failed Authorization: Bearer coded-secret https://service.test/v1?token=coded-query-secret",
+      ),
+      { code: "invalid-input" },
+    );
+  },
+};
+
 async function createWorkspace(): Promise<string> {
   const workspaceDir = join(tmpdir(), `donecheck-desktop-ipc-${crypto.randomUUID()}`);
   await mkdir(join(workspaceDir, "src"), { recursive: true });
@@ -63,9 +96,37 @@ async function createWorkspace(): Promise<string> {
 }
 
 describe("desktop IPC handlers", () => {
+  it("copies only the supplied repair prompt text through the injected clipboard capability", async () => {
+    const copied: string[] = [];
+    const handlers = createDesktopIpcHandlers({
+      writeClipboardText: (text) => copied.push(text),
+    });
+
+    await expect(
+      handlers.copyRepairPrompt({ text: "Repair exactly this report field." }),
+    ).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    });
+    expect(copied).toEqual(["Repair exactly this report field."]);
+  });
+
+  it("rejects empty clipboard requests and does not require Electron in the handler layer", async () => {
+    const writeClipboardText = () => {
+      throw new Error("must not be called");
+    };
+    const handlers = createDesktopIpcHandlers({ writeClipboardText });
+
+    await expect(handlers.copyRepairPrompt({ text: "   " })).resolves.toEqual({
+      ok: false,
+      error: { code: "invalid-input", message: "repair prompt text is required" },
+    });
+  });
+
   it("analyze calls the real core pipeline and returns a judgement report", async () => {
     const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
     const result = await handlers.analyze({
+      requestId: "real-pipeline-analysis",
       workspaceDir: await createWorkspace(),
       requirement: "User can log in and persist a session.",
       claim: "The login function stores a session token in localStorage.",
@@ -111,9 +172,84 @@ describe("desktop IPC handlers", () => {
     }
   });
 
+  it("returns a provider error when semantic judgement fails", async () => {
+    const handlers = createDesktopIpcHandlers({ providerFactory: () => semanticFailureProvider });
+
+    await expect(
+      handlers.analyze({
+        requestId: "semantic-provider-failure",
+        workspaceDir: await createWorkspace(),
+        requirement: "User can log in and persist a session.",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "provider-error",
+        message: "Online analysis could not be completed.",
+        providerErrorKind: "service-unavailable",
+      },
+    });
+  });
+
+  it("does not expose provider diagnostics through IPC", async () => {
+    const handlers = createDesktopIpcHandlers({ providerFactory: () => semanticFailureProvider });
+
+    const result = await handlers.analyze({
+      requestId: "semantic-provider-secret",
+      workspaceDir: await createWorkspace(),
+      requirement: "User can log in and persist a session.",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected provider failure");
+    const serializedError = JSON.stringify(result.error);
+    expect(serializedError).not.toMatch(/test-secret-value|query-secret|https?:\/\//iu);
+  });
+
+  it("does not trust provider-supplied error codes when serializing analysis failures", async () => {
+    const handlers = createDesktopIpcHandlers({
+      providerFactory: () => codedSemanticFailureProvider,
+    });
+
+    const result = await handlers.analyze({
+      requestId: "semantic-provider-coded-secret",
+      workspaceDir: await createWorkspace(),
+      requirement: "User can log in and persist a session.",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "provider-error",
+        message: "Online analysis could not be completed.",
+        providerErrorKind: "service-unavailable",
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/coded-secret|coded-query-secret|https?:\/\//iu);
+  });
+
+  it("returns a safe non-provider error for other desktop operation failures", async () => {
+    const handlers = createDesktopIpcHandlers({
+      selectDirectory: async () => {
+        throw new Error(
+          "desktop failure Authorization: Bearer test-secret-value https://service.test/desktop",
+        );
+      },
+    });
+
+    await expect(handlers.selectWorkspace()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "unknown",
+        message: "The requested operation could not be completed.",
+      },
+    });
+  });
+
   it("renderHtml returns a self-contained report document for a real report", async () => {
     const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
     const analyzed = await handlers.analyze({
+      requestId: "self-contained-report",
       workspaceDir: await createWorkspace(),
       requirement: "User can log in and persist a session.",
       claim: "The login function stores a session token in localStorage.",
@@ -127,7 +263,7 @@ describe("desktop IPC handlers", () => {
     if (!html.ok) throw new Error(html.error.message);
     expect(html.data.html).toMatch(/^<!doctype html><html lang="zh-CN">/u);
     expect(html.data.html).toContain("DoneCheck");
-    expect(html.data.html).toContain("判定列表");
+    expect(html.data.html).toContain("检查结果");
     expect(html.data.html).toContain('<style data-donecheck-report-styles="true">');
     for (const matcher of externalResourceMatchers) {
       expect(html.data.html).not.toMatch(matcher);
@@ -137,6 +273,7 @@ describe("desktop IPC handlers", () => {
   it("keeps export style selectors aligned with real report DOM attributes", async () => {
     const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
     const analyzed = await handlers.analyze({
+      requestId: "report-selector-contract",
       workspaceDir: await createWorkspace(),
       requirement: "User can log in and persist a session.",
       claim: "The login function stores a session token in localStorage.",
@@ -150,15 +287,16 @@ describe("desktop IPC handlers", () => {
     if (!html.ok) throw new Error(html.error.message);
     expect(html.data.html).toContain("article[data-locale]");
     expect(html.data.html).toContain('article article[data-highlighted="true"]');
-    expect(html.data.html).toContain('article article[data-kind="extra-scope"]');
+    expect(html.data.html).toContain('article article[data-appearance="scope-warning"]');
     expect(html.data.html).toContain('data-locale="zh-CN"');
     expect(html.data.html).toContain('data-highlighted="true"');
-    expect(html.data.html).toContain('data-kind="extra-scope"');
+    expect(html.data.html).not.toContain('data-kind="extra-scope"');
   });
 
   it("treats report text URLs as self-contained content while blocking external resources", async () => {
     const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
     const analyzed = await handlers.analyze({
+      requestId: "report-text-urls",
       workspaceDir: await createWorkspace(),
       requirement: "User can log in and persist a session. See https://example.com/spec.",
       claim: "The login function stores a session token in localStorage for http://localhost/docs.",
@@ -192,6 +330,7 @@ describe("desktop IPC handlers", () => {
   it("renderHtml honors locale and template options", async () => {
     const handlers = createDesktopIpcHandlers({ providerFactory: () => realPipelineProvider });
     const analyzed = await handlers.analyze({
+      requestId: "localized-report",
       workspaceDir: await createWorkspace(),
       requirement: "User can log in and persist a session.",
       claim: "The login function stores a session token in localStorage.",
@@ -216,17 +355,18 @@ describe("desktop IPC handlers", () => {
     if (!zh.ok) throw new Error(zh.error.message);
     expect(en.data.html).toContain('<html lang="en">');
     expect(en.data.html).toContain('<style data-donecheck-report-styles="true">');
-    expect(en.data.html).toContain("TODO Report");
-    expect(en.data.html).toContain("Judgements");
+    expect(en.data.html).toContain("Task-list Report");
+    expect(en.data.html).toContain("Findings");
     expect(zh.data.html).toContain('<html lang="zh-CN">');
     expect(zh.data.html).toContain('<style data-donecheck-report-styles="true">');
     expect(zh.data.html).toContain("前端报告");
-    expect(zh.data.html).toContain("判定列表");
+    expect(zh.data.html).toContain("检查结果");
   });
 
   it("returns structured errors instead of throwing across IPC boundaries", async () => {
     const handlers = createDesktopIpcHandlers();
     const result = await handlers.analyze({
+      requestId: "invalid-requirement",
       workspaceDir: await createWorkspace(),
       requirement: "",
     });
@@ -247,6 +387,7 @@ describe("desktop IPC handlers", () => {
       providerFactory: () => realPipelineProvider,
     });
     const analyzed = await handlers.analyze({
+      requestId: "history-analysis",
       workspaceDir: await createWorkspace(),
       requirement: "User can log in and persist a session.",
       claim: "The login function stores a session token in localStorage.",
@@ -318,7 +459,6 @@ describe("desktop IPC handlers", () => {
         patch: {
           ignore: ["dist", "dist", "node_modules"],
           providerMode: "openai-compatible",
-          structuredOutputStrict: false,
           topK: 3,
         },
       }),
@@ -327,7 +467,6 @@ describe("desktop IPC handlers", () => {
       data: expect.objectContaining({
         ignore: ["dist", "node_modules"],
         providerMode: "openai-compatible",
-        structuredOutputStrict: false,
         topK: 3,
       }),
     });
@@ -408,6 +547,7 @@ describe("desktop IPC handlers", () => {
     it("decompose returns requirements, claims, assumptions, clarifyingQuestions, and warnings", async () => {
       const handlers = createDesktopIpcHandlers({ providerFactory: () => multiEntryProvider });
       const result = await handlers.decompose({
+        requestId: "decompose-complete-response",
         workspaceDir: await createWorkspace(),
         requirement: "User can log in and persist a session.",
         claim: "The login function stores a session token in localStorage.",
@@ -425,6 +565,7 @@ describe("desktop IPC handlers", () => {
     it("analyze passes requirements and claims arrays to the pipeline producing multi-entry coverage", async () => {
       const handlers = createDesktopIpcHandlers({ providerFactory: () => multiEntryProvider });
       const decomposition = await handlers.decompose({
+        requestId: "multi-entry-analysis",
         workspaceDir: await createWorkspace(),
         requirement: "User can log in and persist a session.",
         claim: "The login function stores a session token in localStorage.",
@@ -432,6 +573,7 @@ describe("desktop IPC handlers", () => {
       if (!decomposition.ok) throw new Error(decomposition.error.message);
 
       const result = await handlers.analyze({
+        requestId: "multi-entry-analysis",
         workspaceDir: await createWorkspace(),
         requirement: "User can log in and persist a session.",
         claim: "The login function stores a session token in localStorage.",
@@ -454,6 +596,7 @@ describe("desktop IPC handlers", () => {
     it("analyze falls back to single-entry path when decomposition arrays are absent", async () => {
       const handlers = createDesktopIpcHandlers({ providerFactory: () => multiEntryProvider });
       const result = await handlers.analyze({
+        requestId: "single-entry-analysis",
         workspaceDir: await createWorkspace(),
         requirement: "User can log in and persist a session.",
         claim: "The login function stores a session token in localStorage.",
@@ -468,6 +611,7 @@ describe("desktop IPC handlers", () => {
     it("decompose validates workspaceDir and requirement", async () => {
       const handlers = createDesktopIpcHandlers({ providerFactory: () => multiEntryProvider });
       const missingWorkspace = await handlers.decompose({
+        requestId: "missing-workspace",
         workspaceDir: "",
         requirement: "need login",
       });
@@ -476,6 +620,7 @@ describe("desktop IPC handlers", () => {
         error: { code: "invalid-input", message: "workspaceDir is required" },
       });
       const missingRequirement = await handlers.decompose({
+        requestId: "missing-requirement",
         workspaceDir: "/tmp",
         requirement: "",
       });
@@ -485,7 +630,27 @@ describe("desktop IPC handlers", () => {
       });
     });
 
-    it("decompose wraps provider errors as structured IPC errors", async () => {
+    it("decompose and analyze reject invalid workspaces before provider construction", async () => {
+      let constructions = 0;
+      const handlers = createDesktopIpcHandlers({
+        providerFactory: () => {
+          constructions += 1;
+          return multiEntryProvider;
+        },
+      });
+      const request = {
+        requestId: "invalid-workspace",
+        workspaceDir: "/missing/donecheck-desktop-workspace",
+        requirement: "need login",
+      };
+      const decomposed = await handlers.decompose(request);
+      const analyzed = await handlers.analyze(request);
+      expect(decomposed).toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      expect(analyzed).toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      expect(constructions).toBe(0);
+    });
+
+    it("decompose returns a safe provider error category", async () => {
       const throwingProvider: LLMProvider = {
         async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
           if (input.schemaName === "RequirementDecompositionOutput") {
@@ -496,6 +661,7 @@ describe("desktop IPC handlers", () => {
       };
       const handlers = createDesktopIpcHandlers({ providerFactory: () => throwingProvider });
       const result = await handlers.decompose({
+        requestId: "provider-error",
         workspaceDir: await createWorkspace(),
         requirement: "User can log in and persist a session.",
       });
@@ -503,9 +669,68 @@ describe("desktop IPC handlers", () => {
       expect(result).toEqual({
         ok: false,
         error: {
-          code: "unknown",
-          message: "decomposition provider failure",
+          code: "provider-error",
+          message: "Online analysis could not be completed.",
+          providerErrorKind: "unknown",
         },
+      });
+    });
+
+    it("passes a cancellable signal to the provider", async () => {
+      let receivedSignal: AbortSignal | undefined;
+      const signalProvider: LLMProvider = {
+        async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+          receivedSignal = input.signal;
+          return multiEntryProvider.generateObject(input);
+        },
+      };
+      const handlers = createDesktopIpcHandlers({ providerFactory: () => signalProvider });
+
+      const result = await handlers.decompose({
+        requestId: "provider-signal",
+        workspaceDir: await createWorkspace(),
+        requirement: "User can log in.",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(receivedSignal).toBeInstanceOf(AbortSignal);
+      expect(receivedSignal?.aborted).toBe(false);
+    });
+
+    it("aborts an active request and returns a structured error", async () => {
+      let receivedSignal: AbortSignal | undefined;
+      let markProviderStarted: (() => void) | undefined;
+      const providerStarted = new Promise<void>((resolve) => {
+        markProviderStarted = resolve;
+      });
+      const pendingProvider: LLMProvider = {
+        generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
+          receivedSignal = input.signal;
+          markProviderStarted?.();
+          return new Promise((_resolve, reject) => {
+            input.signal?.addEventListener("abort", () => reject(input.signal?.reason), {
+              once: true,
+            });
+          });
+        },
+      };
+      const handlers = createDesktopIpcHandlers({ providerFactory: () => pendingProvider });
+      const requestId = "cancel-active-request";
+      const analysis = handlers.decompose({
+        requestId,
+        workspaceDir: await createWorkspace(),
+        requirement: "User can log in.",
+      });
+      await providerStarted;
+
+      const canceled = await handlers.cancelAnalysis({ requestId });
+      const result = await analysis;
+
+      expect(canceled).toEqual({ ok: true, data: undefined });
+      expect(receivedSignal?.aborted).toBe(true);
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "canceled", message: "Analysis canceled" },
       });
     });
   });

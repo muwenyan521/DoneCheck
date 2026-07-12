@@ -23,8 +23,74 @@
         pnpmShim = pkgs.writeShellScriptBin "pnpm" ''
           exec corepack pnpm "$@"
         '';
+        buildPnpm = pkgs.pnpm_11.override { nodejs-slim = pkgs.nodejs-slim_22; };
+        source = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            let name = baseNameOf path;
+            in !(builtins.elem name [
+              ".cache"
+              ".git"
+              ".turbo"
+              "dist"
+              "node_modules"
+              "result"
+            ]);
+        };
+        donecheck = pkgs.stdenv.mkDerivation (finalAttrs: {
+          pname = "donecheck";
+          version = "0.1.0";
+          src = source;
+          CI = "true";
+
+          nativeBuildInputs = [
+            pkgs.makeWrapper
+            pkgs.nodejs_22
+            buildPnpm
+            pkgs.pnpmConfigHook
+          ];
+
+          pnpmWorkspaces = [ "@donecheck/cli..." ];
+          pnpmDeps = pkgs.fetchPnpmDeps {
+            inherit (finalAttrs) pname version src pnpmWorkspaces;
+            pnpm = buildPnpm;
+            fetcherVersion = 4;
+            hash = "sha256-eY/lXZBc4zDTKEMXkggFqeXhf/jL35fLNYMikOheZIM=";
+          };
+
+          buildPhase = ''
+            runHook preBuild
+            pnpm --filter @donecheck/cli... build
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/lib/donecheck"
+            cp apps/cli/dist/index.js "$out/lib/donecheck/index.js"
+            makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/donecheck" \
+              --add-flags "$out/lib/donecheck/index.js"
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Verify whether implementation evidence satisfies a requirement";
+            license = pkgs.lib.licenses.asl20;
+            mainProgram = "donecheck";
+          };
+        });
       in
       {
+        packages = {
+          inherit donecheck;
+          default = donecheck;
+        };
+
+        apps = {
+          donecheck = flake-utils.lib.mkApp { drv = donecheck; };
+          default = flake-utils.lib.mkApp { drv = donecheck; };
+        };
+
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             nodejs_22

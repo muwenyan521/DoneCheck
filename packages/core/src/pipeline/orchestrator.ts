@@ -33,6 +33,7 @@ export interface OrchestrateAnalysisInput {
   readonly requirements?: readonly import("../semantic/schema.js").SemanticRequirement[];
   readonly topK?: number;
   readonly concurrency?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface PipelineOutput {
@@ -82,6 +83,7 @@ export async function orchestrateAnalysis(
     staticSignals,
     structureSummary,
     ...(input.topK === undefined ? {} : { topK: input.topK }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
   const fileMap = new Map(input.files.map((f) => [f.relativePath, f.content]));
@@ -120,43 +122,35 @@ export async function orchestrateAnalysis(
     staticSignals: targetStaticSignals(staticSignals),
   });
 
-  const pipelineWarnings: string[] = [];
   const normalizationWarnings: string[] = [];
   const draftResults = await mapWithConcurrency(
     requirements,
     input.concurrency ?? 3,
     async (requirement) => {
       const match = matches.find((item) => item.requirement.id === requirement.id);
-      try {
-        return await draftSemanticJudgements({
-          requirements: [requirement],
-          ...(match === undefined ? {} : { claim: match.claim }),
-          candidateFiles: selection.candidateFiles.map((p) => ({
-            filePath: p,
-            recallSource: "llmSelected" as const,
-          })),
-          evidenceSnippets: selectEvidenceForRequirement({
-            candidateFiles: selection.candidateFiles,
-            ...(match === undefined ? {} : { claim: match.claim, match }),
-            evidenceSnippets,
-            fakeImplementationSignals: targeted.fakeImplementationSignals,
-            requirement,
-            staticSignals: targeted.staticSignals,
-          }),
-          onNormalizationWarnings: (warnings) => {
-            for (const warning of warnings) {
-              normalizationWarnings.push(`Requirement ${requirement.id}: ${warning}`);
-            }
-          },
-          provider: input.provider,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        pipelineWarnings.push(
-          `Requirement ${requirement.id} semantic judgement failed: ${message}. Degrading to insufficient-evidence.`,
-        );
-        return [];
-      }
+      return draftSemanticJudgements({
+        requirements: [requirement],
+        ...(match === undefined ? {} : { claim: match.claim }),
+        candidateFiles: selection.candidateFiles.map((p) => ({
+          filePath: p,
+          recallSource: "llmSelected" as const,
+        })),
+        evidenceSnippets: selectEvidenceForRequirement({
+          candidateFiles: selection.candidateFiles,
+          ...(match === undefined ? {} : { claim: match.claim, match }),
+          evidenceSnippets,
+          fakeImplementationSignals: targeted.fakeImplementationSignals,
+          requirement,
+          staticSignals: targeted.staticSignals,
+        }),
+        onNormalizationWarnings: (warnings) => {
+          for (const warning of warnings) {
+            normalizationWarnings.push(`Requirement "${requirement.text}": ${warning}`);
+          }
+        },
+        provider: input.provider,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
     },
   );
   const drafts = draftResults.flat();
@@ -197,8 +191,8 @@ export async function orchestrateAnalysis(
     generatedAt: input.generatedAt,
   });
 
-  if (pipelineWarnings.length > 0 || normalizationWarnings.length > 0) {
-    report.warnings = [...report.warnings, ...pipelineWarnings, ...normalizationWarnings];
+  if (normalizationWarnings.length > 0) {
+    report.warnings = [...report.warnings, ...normalizationWarnings];
   }
 
   return {

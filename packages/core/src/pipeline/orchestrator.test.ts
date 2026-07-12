@@ -164,7 +164,7 @@ describe("orchestrateAnalysis", () => {
     const csv = result.report.judgements.find((judgement) => judgement.id === "requirement:REQ-3");
     expect(result.report.judgements.length).toBe(4);
     expect(login?.finalStatus).not.toBe("suspicious-fake-implementation");
-    expect(csv?.finalStatus).toBe("suspicious-fake-implementation");
+    expect(csv?.finalStatus).toBe("partial");
     expect(csv?.signals.fakeImplementationSignals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ filePath: "src/export.ts", targetId: "REQ-3" }),
@@ -552,7 +552,7 @@ describe("orchestrateAnalysis", () => {
     expect(claim2?.finalStatus).not.toBe("insufficient-evidence");
   });
 
-  it("degrades to insufficient-evidence when a single requirement judgement fails, instead of crashing the report", async () => {
+  it("fails the analysis when a semantic judgement request fails", async () => {
     const provider: LLMProvider = {
       async generateObject<T>(input: GenerateObjectInput<T>): Promise<GenerateObjectResult<T>> {
         if (input.schemaName === "FileSelectionModelOutput") {
@@ -598,39 +598,32 @@ describe("orchestrateAnalysis", () => {
       },
     };
 
-    const result = await orchestrateAnalysis({
-      requirement: "REQ-1: Implement login.\nREQ-3: Implement CSV export.",
-      claim: "CLAIM-1: Login is implemented.\nCLAIM-3: CSV export is implemented.",
-      requirements: [
-        { id: "REQ-1", text: "Implement login." },
-        { id: "REQ-3", text: "Implement CSV export." },
-      ],
-      claims: [
-        { id: "CLAIM-1", text: "Login is implemented." },
-        { id: "CLAIM-3", text: "CSV export is implemented." },
-      ],
-      files: [
-        {
-          relativePath: "src/login.ts",
-          content: "export function login() { localStorage.setItem('x','1'); }",
-        },
-        {
-          relativePath: "src/export.ts",
-          content: "export function exportCsv() { return 'csv'; }",
-        },
-      ],
-      provider,
-      generatedAt: "2026-06-28T00:00:00.000Z",
-    });
-
-    const login = result.report.judgements.find(
-      (judgement) => judgement.id === "requirement:REQ-1",
-    );
-    const csv = result.report.judgements.find((judgement) => judgement.id === "requirement:REQ-3");
-    expect(login?.finalStatus).not.toBe("insufficient-evidence");
-    expect(csv?.finalStatus).toBe("insufficient-evidence");
-    expect(csv?.reasonCode).toBe("missing-semantic-draft");
-    expect(result.report.warnings.some((w) => w.includes("REQ-3"))).toBe(true);
+    await expect(
+      orchestrateAnalysis({
+        requirement: "REQ-1: Implement login.\nREQ-3: Implement CSV export.",
+        claim: "CLAIM-1: Login is implemented.\nCLAIM-3: CSV export is implemented.",
+        requirements: [
+          { id: "REQ-1", text: "Implement login." },
+          { id: "REQ-3", text: "Implement CSV export." },
+        ],
+        claims: [
+          { id: "CLAIM-1", text: "Login is implemented." },
+          { id: "CLAIM-3", text: "CSV export is implemented." },
+        ],
+        files: [
+          {
+            relativePath: "src/login.ts",
+            content: "export function login() { localStorage.setItem('x','1'); }",
+          },
+          {
+            relativePath: "src/export.ts",
+            content: "export function exportCsv() { return 'csv'; }",
+          },
+        ],
+        provider,
+        generatedAt: "2026-06-28T00:00:00.000Z",
+      }),
+    ).rejects.toThrow("simulated provider 429 rate limit");
   });
 
   it("consumes possibleExtraScope from semantic drafts as code-evidenced extra-scope candidates", async () => {

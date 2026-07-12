@@ -22,8 +22,8 @@ export const reportTemplates = [
     },
     id: "generic",
     layout: {
-      defaultCollapsedSections: ["debug"],
-      sections: ["overview", "risk-highlights", "judgements", "debug"],
+      defaultCollapsedSections: [],
+      sections: ["overview", "risk-highlights", "judgements"],
     },
     nameKey: "template.generic.name",
     scenarios: ["generic"],
@@ -40,8 +40,8 @@ export const reportTemplates = [
     },
     id: "todo",
     layout: {
-      defaultCollapsedSections: ["debug"],
-      sections: ["overview", "judgements", "risk-highlights", "debug"],
+      defaultCollapsedSections: [],
+      sections: ["overview", "judgements", "risk-highlights"],
     },
     nameKey: "template.todo.name",
     scenarios: ["todo", "generic"],
@@ -55,7 +55,7 @@ export const reportTemplates = [
     id: "frontend",
     layout: {
       defaultCollapsedSections: [],
-      sections: ["overview", "risk-highlights", "debug", "judgements"],
+      sections: ["overview", "risk-highlights", "judgements"],
     },
     nameKey: "template.frontend.name",
     scenarios: ["frontend", "form"],

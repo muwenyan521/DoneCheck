@@ -1,12 +1,16 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { BrowserWindow, app } from "electron";
 import { buildSmokeReadyPayload, smokeSettingsRoundtrip } from "./gui-smoke-hook.js";
 import { registerIpcHandlers } from "./ipc.js";
+import { isAllowedRendererNavigation } from "./navigation-policy.js";
 
 const SMOKE_TIMEOUT_MS = Number(process.env.DONECHECK_GUI_SMOKE_TIMEOUT_MS ?? 30000);
 
 export function createMainWindow(): BrowserWindow {
+  const rendererEntryPath = getRendererEntryPath();
+  const rendererEntryUrl = pathToFileURL(rendererEntryPath).href;
   const win = new BrowserWindow({
     width: 1024,
     height: 768,
@@ -19,11 +23,9 @@ export function createMainWindow(): BrowserWindow {
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("file:")) {
-      event.preventDefault();
-    }
+    if (!isAllowedRendererNavigation(url, rendererEntryUrl)) event.preventDefault();
   });
-  win.loadFile(resolve(__dirname, "renderer", "index.html"));
+  win.loadFile(rendererEntryPath);
   return win;
 }
 
@@ -33,7 +35,7 @@ export function startElectronApp(): void {
     return;
   }
   app.whenReady().then(() => {
-    registerIpcHandlers();
+    registerIpcHandlers(pathToFileURL(getRendererEntryPath()).href);
     createMainWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -81,7 +83,7 @@ function startGuiSmoke(): void {
 
   app.whenReady().then(() => {
     try {
-      registerIpcHandlers();
+      registerIpcHandlers(pathToFileURL(getRendererEntryPath()).href);
     } catch (error) {
       clearTimeout(timeout);
       finish({
@@ -131,4 +133,8 @@ function startGuiSmoke(): void {
     }
     app.quit();
   });
+}
+
+function getRendererEntryPath(): string {
+  return resolve(__dirname, "renderer", "index.html");
 }

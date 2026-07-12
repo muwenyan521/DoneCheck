@@ -59,7 +59,7 @@ describe("analyze", () => {
       ],
       score: 1,
       status: "pass",
-      summary: "DoneCheck 0.0.0: 3 checks passed, 0 partial, 0 failed. Overall score 100%.",
+      summary: "DoneCheck: 3 checks passed, 0 partial, 0 failed. Overall score 100%.",
     });
   });
 

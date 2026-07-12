@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,7 +26,8 @@ function runCheckerFailure() {
 }
 
 function writeFixture(relativePath, content) {
-  const absolute = path.join(root, relativePath);
+  const parsed = path.parse(relativePath);
+  const absolute = path.join(root, parsed.dir, `${parsed.name}-${randomUUID()}${parsed.ext}`);
   mkdirSync(path.dirname(absolute), { recursive: true });
   writeFileSync(absolute, content);
   return absolute;
@@ -46,7 +48,7 @@ function isExecError(error) {
   );
 }
 
-describe("dependency boundary checker", () => {
+describe.sequential("dependency boundary checker", () => {
   it("passes on a clean tree", () => {
     expect(runChecker()).toContain("Dependency boundaries passed.");
   });

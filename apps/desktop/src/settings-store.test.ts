@@ -1,6 +1,10 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { createSettingsStore, defaultDesktopSettings } from "./settings-store.js";
+import {
+  createSettingsStore,
+  defaultDesktopSettings,
+  normalizeProviderBaseUrl,
+} from "./settings-store.js";
 
 describe("settings store", () => {
   it("returns defaults when no settings exist", () => {
@@ -23,7 +27,6 @@ describe("settings store", () => {
       providerMode: "openai-compatible",
       providerModel: "compatible-model",
       recentWorkspaces: ["/workspace/demo", "/workspace/other"],
-      structuredOutputStrict: false,
       templateId: "todo",
       topK: 7,
     });
@@ -38,7 +41,6 @@ describe("settings store", () => {
       providerMode: "openai-compatible",
       providerModel: "compatible-model",
       recentWorkspaces: ["/workspace/demo", "/workspace/other"],
-      structuredOutputStrict: false,
       templateId: "todo",
       topK: 7,
     });
@@ -77,10 +79,6 @@ describe("settings store", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)");
     db.prepare("INSERT INTO app_settings (key, value_json) VALUES (?, ?)").run(
-      "structuredOutputStrict",
-      "not-json",
-    );
-    db.prepare("INSERT INTO app_settings (key, value_json) VALUES (?, ?)").run(
       "topK",
       JSON.stringify("not-a-number"),
     );
@@ -88,6 +86,28 @@ describe("settings store", () => {
 
     expect(store.get()).toEqual(defaultDesktopSettings);
 
+    store.close();
+  });
+
+  it.each([
+    ["", ""],
+    [" https://compatible.example/v1/ ", "https://compatible.example/v1"],
+    ["http://localhost:11434/v1/", "http://localhost:11434/v1"],
+    ["http://127.8.9.10:8080/v1", "http://127.8.9.10:8080/v1"],
+    ["http://[::1]:8080/v1", "http://[::1]:8080/v1"],
+  ])("accepts a safe online analysis address %s", (input, expected) => {
+    expect(normalizeProviderBaseUrl(input)).toBe(expected);
+  });
+
+  it.each([
+    "http://compatible.example/v1",
+    "https://user:password@compatible.example/v1",
+    "ftp://compatible.example/v1",
+    "not a url",
+  ])("rejects an unsafe online analysis address %s without persisting it", (providerBaseUrl) => {
+    const store = createSettingsStore({ databasePath: ":memory:" });
+    expect(() => store.set({ providerBaseUrl })).toThrow(/online analysis address/iu);
+    expect(store.get().providerBaseUrl).toBe("");
     store.close();
   });
 });

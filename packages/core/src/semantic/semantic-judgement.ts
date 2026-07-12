@@ -22,6 +22,7 @@ export interface DraftSemanticJudgementInput {
   readonly provider: LLMProvider;
   readonly requirement: SemanticRequirement;
   readonly retry?: RetryOptions;
+  readonly signal?: AbortSignal;
 }
 
 export interface DraftSemanticJudgementsInput {
@@ -33,6 +34,7 @@ export interface DraftSemanticJudgementsInput {
   readonly provider: LLMProvider;
   readonly requirements: readonly SemanticRequirement[];
   readonly retry?: RetryOptions;
+  readonly signal?: AbortSignal;
 }
 
 export async function draftSemanticJudgement(
@@ -50,8 +52,9 @@ export async function draftSemanticJudgement(
         prompt,
         schema: semanticJudgementDraftSchema,
         schemaName: "SemanticJudgementDraft",
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
-    input.retry,
+    { ...input.retry, ...(input.signal === undefined ? {} : { signal: input.signal }) },
   );
 
   const draft = semanticJudgementDraftSchema.parse(response.object);
@@ -77,6 +80,7 @@ export async function draftSemanticJudgements(
       ...(input.candidateFiles === undefined ? {} : { candidateFiles: input.candidateFiles }),
       ...(input.claim === undefined ? {} : { claim: input.claim }),
       ...(input.retry === undefined ? {} : { retry: input.retry }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.onNormalizationWarnings === undefined
         ? {}
         : { onNormalizationWarnings: input.onNormalizationWarnings }),

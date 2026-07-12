@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "openai": "catalog:"
+    "openai": "catalog:",
+    "zod-to-json-schema": "catalog:"
   },
   "devDependencies": {
     "@donecheck/config": "workspace:*",

@@ -26,7 +26,7 @@ describe("parseArgs", () => {
         "requirement.md",
         "--evidence-file",
         "evidence.md",
-        "--legacy",
+        "--text-only",
         "--json",
         "--partial-ok",
       ]),
@@ -146,10 +146,10 @@ describe("parseArgs", () => {
       if (!r.ok) expect(r.error).toContain("mutually exclusive");
     });
 
-    it("rejects --json without --legacy", () => {
+    it("rejects --json without --text-only", () => {
       const r = parseArgs(["--requirement", "x", "--evidence", "y", "--json"]);
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error).toContain("--json requires --legacy");
+      if (!r.ok) expect(r.error).toContain("--json requires --text-only");
     });
 
     it("rejects --output without --html", () => {
@@ -158,8 +158,14 @@ describe("parseArgs", () => {
     });
   });
 
-  describe("--legacy / --mock", () => {
-    it("parses --legacy", () => {
+  describe("--text-only / --mock", () => {
+    it("parses the public --text-only name", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--text-only"]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.legacy).toBe(true);
+    });
+
+    it("keeps --legacy as a hidden compatibility alias", () => {
       const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy"]);
       expect(r.ok).toBe(true);
       if (r.ok) expect(r.value.legacy).toBe(true);
@@ -171,8 +177,8 @@ describe("parseArgs", () => {
       if (r.ok) expect(r.value.mock).toBe(true);
     });
 
-    it("parses --legacy --json together", () => {
-      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy", "--json"]);
+    it("parses --text-only --json together", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--text-only", "--json"]);
       expect(r.ok).toBe(true);
       if (r.ok) {
         expect(r.value.legacy).toBe(true);
@@ -180,16 +186,16 @@ describe("parseArgs", () => {
       }
     });
 
-    it("rejects --legacy + --rules together", () => {
-      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy", "--rules"]);
+    it("rejects --text-only + --rules together", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--text-only", "--rules"]);
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error).toContain("--legacy cannot be combined with --rules");
+      if (!r.ok) expect(r.error).toContain("--text-only cannot be combined with --rules");
     });
 
-    it("rejects --legacy + --html together", () => {
-      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--legacy", "--html"]);
+    it("rejects --text-only + --html together", () => {
+      const r = parseArgs(["--requirement", "x", "--evidence", "y", "--text-only", "--html"]);
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error).toContain("--legacy cannot be combined");
+      if (!r.ok) expect(r.error).toContain("--text-only cannot be combined");
     });
   });
 });

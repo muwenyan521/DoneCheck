@@ -1,5 +1,4 @@
 import { buildJudgementReport } from "@donecheck/core";
-import { judgementReportSchema } from "@donecheck/shared";
 import { describe, expect, it } from "vitest";
 import { formatHtml, formatRulesJson } from "./rules-output.js";
 
@@ -14,10 +13,43 @@ const report = buildJudgementReport({
 });
 
 describe("rules-output", () => {
-  it("formatRulesJson produces schema-valid JSON", () => {
+  it("formatRulesJson exposes only the documented user-facing report", () => {
     const json = formatRulesJson(report);
     const parsed = JSON.parse(json);
-    expect(judgementReportSchema.parse(parsed)).toEqual(parsed);
+
+    expect(parsed.generatedAt).toBe(report.generatedAt);
+    expect(parsed.requirementCoverage).toEqual(report.requirementCoverage);
+    expect(parsed.judgements[0]).toMatchObject({
+      confidence: report.judgements[0]?.confidence,
+      certainty: "Low",
+      explanation: report.judgements[0]?.explanation,
+      itemType: "Requirement",
+      status: "Insufficient Evidence",
+    });
+    expect(parsed.outcomeSummary).toEqual([
+      { count: 0, status: "Fulfilled" },
+      { count: 0, status: "Partial" },
+      { count: 1, status: "Insufficient Evidence" },
+      { count: 0, status: "Unfulfilled" },
+      { count: 0, status: "Appears Complete Without Working Evidence" },
+      { count: 0, status: "Extra Scope" },
+    ]);
+    for (const internalField of [
+      '"version"',
+      '"id"',
+      '"sourceId"',
+      '"reasonCode"',
+      '"semanticDraft"',
+      '"signals"',
+      '"includedJudgementIds"',
+      '"finalStatus"',
+      '"summaryStats"',
+      "insufficient-evidence",
+      "suspicious-fake-implementation",
+      "extra-scope",
+    ]) {
+      expect(json).not.toContain(internalField);
+    }
   });
 
   it("formatRulesJson ends with a newline", () => {

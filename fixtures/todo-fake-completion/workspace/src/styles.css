@@ -1,0 +1,7 @@
+.todo-app {
+  display: grid;
+  gap: 1rem;
+  margin: 0 auto;
+  max-width: 40rem;
+  padding: 2rem;
+}

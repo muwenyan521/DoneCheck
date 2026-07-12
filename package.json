@@ -15,7 +15,7 @@
     "commitlint": "commitlint",
     "lint": "git ls-files -z | xargs -0 -r biome check --no-errors-on-unmatched && pnpm check:deps && pnpm check:licenses",
     "prepare": "husky",
-    "test": "vitest run scripts/*.test.mjs && turbo run test",
+    "test": "vitest run --no-file-parallelism scripts/*.test.mjs && turbo run test",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },

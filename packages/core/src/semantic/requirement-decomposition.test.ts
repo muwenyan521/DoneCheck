@@ -242,4 +242,22 @@ describe("decomposeRequirements", () => {
     ]);
     expect(result.claims.map((item) => item.text)).toEqual(["Login works.", "Export works."]);
   });
+
+  it("removes internal item identifiers from user-facing review notes", () => {
+    const result = stabilizeRequirementDecomposition({
+      requirement: "Build login and logout.",
+      output: {
+        assumptions: ["REQ-1: The app already has a user store."],
+        claims: [],
+        clarifyingQuestions: ["CLAIM-2: Should logout clear all sessions?"],
+        requirements: [{ id: "REQ-1", text: "Build login and logout." }],
+        warnings: ["REQ-1 has no matching CLAIM-2."],
+      },
+    });
+
+    expect(result.assumptions).toEqual(["The app already has a user store."]);
+    expect(result.clarifyingQuestions).toEqual(["Should logout clear all sessions?"]);
+    expect(result.assumptions.join(" ")).not.toMatch(/(?:REQ|CLAIM)-[A-Z0-9_-]+/iu);
+    expect(result.clarifyingQuestions.join(" ")).not.toMatch(/(?:REQ|CLAIM)-[A-Z0-9_-]+/iu);
+  });
 });

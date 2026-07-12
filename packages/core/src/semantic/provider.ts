@@ -22,6 +22,7 @@ export interface GenerateObjectInput<T = unknown> {
   readonly prompt: LLMPrompt;
   readonly schema: z.ZodType<T>;
   readonly schemaName: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface GenerateObjectResult<T = unknown> {

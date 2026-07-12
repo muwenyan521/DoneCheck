@@ -15,6 +15,7 @@ export interface SelectCandidateFilesInput {
   readonly provider: LLMProvider;
   readonly requirement: string;
   readonly retry?: RetryOptions;
+  readonly signal?: AbortSignal;
   readonly staticSignals?: readonly StaticSignal[];
   readonly structureSummary: string;
   readonly topK?: number;
@@ -38,8 +39,9 @@ export async function selectCandidateFiles(
         prompt,
         schema: fileSelectionModelOutputSchema,
         schemaName: "FileSelectionModelOutput",
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
-    input.retry,
+    { ...input.retry, ...(input.signal === undefined ? {} : { signal: input.signal }) },
   );
 
   const modelOutput = fileSelectionModelOutputSchema.parse(response.object);

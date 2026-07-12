@@ -59,9 +59,14 @@ declare module "electron" {
     invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   }
 
+  export interface Clipboard {
+    writeText(text: string): void;
+  }
+
   export const app: App;
   export const dialog: Dialog;
   export const ipcMain: IpcMain;
   export const contextBridge: ContextBridge;
   export const ipcRenderer: IpcRenderer;
+  export const clipboard: Clipboard;
 }

@@ -46,7 +46,7 @@ describe("createProvider", () => {
     }
   });
 
-  it("returns deterministic mock when mock flag is true", () => {
+  it("returns local demo provider when mock flag is true", () => {
     const old = process.env.OPENAI_API_KEY;
     // biome-ignore lint/performance/noDelete: env var cleanup requires delete
     delete process.env.OPENAI_API_KEY;
@@ -54,7 +54,8 @@ describe("createProvider", () => {
     try {
       const p = createProvider({ mock: true, stderr: (s) => warns.push(s) });
       expect(p.metadata.provider).toBe("deterministic-mock");
-      expect(warns.join("\n")).toContain("mock");
+      expect(warns.join("\n")).toContain("local demo mode");
+      expect(warns.join("\n")).not.toContain("deterministic mock");
     } finally {
       if (old !== undefined) {
         process.env.OPENAI_API_KEY = old;
@@ -62,7 +63,7 @@ describe("createProvider", () => {
     }
   });
 
-  it("returns deterministic mock when mock flag is true even with API key set", () => {
+  it("returns local demo provider when mock flag is true even with API key set", () => {
     const old = process.env.OPENAI_API_KEY;
     process.env.OPENAI_API_KEY = "sk-test";
     try {

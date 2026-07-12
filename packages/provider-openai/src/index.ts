@@ -6,7 +6,6 @@ import type {
   LLMUsage,
 } from "@donecheck/core";
 import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
 import {
   type NormalizationGuide,
@@ -26,6 +25,7 @@ export interface OpenAIProviderOptions {
   readonly model?: string;
   readonly baseURL?: string;
   readonly client?: OpenAI;
+  readonly requestTimeoutMs?: number;
   readonly structuredOutputStrict?: boolean;
 }
 
@@ -34,6 +34,7 @@ export interface ResolvedOpenAIProviderConfig {
   readonly apiKeySource: "options.apiKey" | "OPENAI_API_KEY";
   readonly baseURL?: string;
   readonly model: string;
+  readonly requestTimeoutMs: number;
   readonly structuredOutputStrict: boolean;
 }
 
@@ -55,6 +56,8 @@ export class OpenAIProvider implements ProviderWithMetadata {
       new OpenAI({
         apiKey: config.apiKey,
         ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
+        maxRetries: 0,
+        timeout: config.requestTimeoutMs,
       });
     this.model = config.model;
     this.baseURL = config.baseURL;
@@ -75,11 +78,10 @@ export class OpenAIProvider implements ProviderWithMetadata {
       { role: "user" as const, content: input.prompt.user },
     ];
     try {
-      const completion = await this.client.beta.chat.completions.parse({
-        model: this.model,
-        messages,
-        response_format: responseFormat,
-      });
+      const completion = await this.structuredCompletions().parse(
+        { model: this.model, messages, response_format: responseFormat },
+        input.signal === undefined ? undefined : { signal: input.signal },
+      );
       const choice = completion.choices[0];
       const parsed = choice?.message?.parsed;
       if (parsed === undefined || parsed === null) {
@@ -96,6 +98,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
       if (!isUnsupportedResponseFormatError(error) && !isJsonParseError(error)) throw error;
       const fallback = await this.client.chat.completions.create(
         this.buildFallbackRequest(input, messages),
+        input.signal === undefined ? undefined : { signal: input.signal },
       );
       const { parsed } = await this.parseFallbackContent(
         input,
@@ -113,6 +116,17 @@ export class OpenAIProvider implements ProviderWithMetadata {
         usage: buildUsage(fallback.usage),
       };
     }
+  }
+
+  private structuredCompletions(): OpenAI["chat"]["completions"] {
+    const current = this.client.chat?.completions;
+    if (typeof current?.parse === "function") return current;
+    const compatible = this.client as unknown as {
+      readonly beta?: { readonly chat?: { readonly completions?: OpenAI["chat"]["completions"] } };
+    };
+    const legacy = compatible.beta?.chat?.completions;
+    if (typeof legacy?.parse === "function") return legacy;
+    throw new Error("The configured OpenAI client does not support structured responses");
   }
 
   private buildFallbackRequest<T>(
@@ -148,6 +162,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
         messages,
         buildRepairInstruction(input.schemaName, content, first.error),
       ),
+      input.signal === undefined ? undefined : { signal: input.signal },
     );
     const second = parseAndValidateFallbackContent(
       input,
@@ -183,7 +198,11 @@ function resolveReasoningOptions(): Record<string, unknown> {
 }
 
 function buildJsonOnlyInstruction<T>(input: GenerateObjectInput<T>): string {
-  const responseFormat = silentZodResponseFormat(input.schema as z.ZodType<T>, input.schemaName);
+  const { responseFormat } = buildStrictCompatResponseFormat(
+    input.schema as z.ZodType<T>,
+    input.schemaName,
+    false,
+  );
   return [
     `Return only one valid JSON object for schema ${input.schemaName}.`,
     "Do not use Markdown.",
@@ -194,21 +213,8 @@ function buildJsonOnlyInstruction<T>(input: GenerateObjectInput<T>): string {
     "For repairSuggestion, provide a concrete string suggestion instead of omitting it.",
     "For evidenceRefs, use only exact filePath, lineStart, and lineEnd ranges present in the provided evidence snippets.",
     "JSON schema:",
-    JSON.stringify(responseFormat, null, 2),
+    JSON.stringify(responseFormat.json_schema.schema, null, 2),
   ].join("\n");
-}
-
-function silentZodResponseFormat<T>(
-  schema: z.ZodType<T>,
-  name: string,
-): ReturnType<typeof zodResponseFormat> {
-  const originalWarn = console.warn;
-  console.warn = () => {};
-  try {
-    return zodResponseFormat(schema, name);
-  } finally {
-    console.warn = originalWarn;
-  }
 }
 
 function buildRepairInstruction(schemaName: string, content: unknown, error: string): string {
@@ -261,10 +267,10 @@ export function createProvider(options: CreateProviderOptions = {}): ProviderWit
   }
   const sink = options.stderr ?? ((s: string) => process.stderr.write(s));
   sink(
-    "OPENAI_API_KEY is not set. Use --mock for deterministic mock output, or set OPENAI_API_KEY to use a real provider.\n",
+    "OPENAI_API_KEY is not set. Use --mock for local demo data, or set OPENAI_API_KEY to use an external analysis provider.\n",
   );
   throw new ProviderConfigError(
-    "OPENAI_API_KEY is not set. Use --mock for deterministic mock output, or set OPENAI_API_KEY to use a real provider.",
+    "OPENAI_API_KEY is not set. Use --mock for local demo data, or set OPENAI_API_KEY to use an external analysis provider.",
   );
 }
 
@@ -286,7 +292,7 @@ export function createDeterministicMockProvider(): ProviderWithMetadata {
             claims: parseMarkedItems(payload.claim, "CLAIM"),
             confidence: 0.5,
             requirements: parseMarkedItems(payload.requirement, "REQ"),
-            warnings: ["deterministic-mock"],
+            warnings: [],
           }),
           metadata,
           usage: {},
@@ -299,7 +305,7 @@ export function createDeterministicMockProvider(): ProviderWithMetadata {
             candidateFiles: selectDeterministicCandidateFiles(payload),
             confidence: 0.5,
             reasoningSummary:
-              "deterministic mock selected files from prompt structure and static signals",
+              "Sample data selected candidate files from the available project information.",
             warnings: ["deterministic-mock"],
           }),
           metadata,
@@ -312,10 +318,12 @@ export function createDeterministicMockProvider(): ProviderWithMetadata {
         object: input.schema.parse({
           confidence: 0.5,
           evidenceRefs,
-          explanation: "deterministic mock — set OPENAI_API_KEY for real analysis",
+          explanation:
+            "This result was generated locally and was not reviewed by an external analysis service.",
           judgementDraft: "partial",
           ...matchedIds(payload),
-          repairSuggestion: "Set OPENAI_API_KEY to use a real provider.",
+          repairSuggestion:
+            "Run this check with the connected analysis service for a complete assessment.",
         }),
         metadata,
         usage: {},
@@ -375,8 +383,17 @@ function resolveOptionalOpenAIProviderConfig(
         : "OPENAI_API_KEY",
     ...(baseURL === undefined ? {} : { baseURL }),
     model: firstNonEmpty(options.model, process.env.OPENAI_MODEL) ?? "gpt-4o-mini",
+    requestTimeoutMs: resolveRequestTimeoutMs(options.requestTimeoutMs),
     structuredOutputStrict: resolveStructuredOutputStrict(options.structuredOutputStrict),
   };
+}
+
+function resolveRequestTimeoutMs(value: number | undefined): number {
+  if (value === undefined) return 120_000;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new ProviderConfigError("requestTimeoutMs must be a positive finite number.");
+  }
+  return value;
 }
 
 function resolveStructuredOutputStrict(value: boolean | undefined): boolean {
@@ -436,7 +453,7 @@ function extractEvidenceRefs(payload: Record<string, unknown>) {
         filePath: "deterministic-mock-no-snippet",
         lineEnd: 1,
         lineStart: 1,
-        snippetSummary: "deterministic mock could not find candidate evidence snippets",
+        snippetSummary: "No candidate evidence snippets were available in local demo mode.",
       },
     ];
   }

@@ -26,6 +26,11 @@ const report: JudgementReport = {
     totalItems: 2,
     weightedFulfilled: 0.5,
   },
+  consolidatedRepairPrompt: {
+    content: { "zh-CN": "修复未兑现项。", en: "Repair unfulfilled items." },
+    includedJudgementIds: ["requirement:req-partial"],
+    version: "repair-v1",
+  },
   generatedAt: "2026-06-27T00:00:00.000Z",
   judgements: [
     {
@@ -146,7 +151,7 @@ const report: JudgementReport = {
     unfulfilled: 1,
   },
   version: "rules-v1",
-  warnings: ["One requirement has insufficient evidence."],
+  warnings: ["Some items still need more evidence before they can be assessed."],
 };
 
 const genericTemplate: ReportTemplate = {
@@ -161,8 +166,8 @@ const genericTemplate: ReportTemplate = {
   },
   id: "generic",
   layout: {
-    defaultCollapsedSections: ["debug"],
-    sections: ["overview", "risk-highlights", "judgements", "debug"],
+    defaultCollapsedSections: [],
+    sections: ["overview", "risk-highlights", "judgements"],
   },
   nameKey: "template.generic.name",
   scenarios: ["generic"],
@@ -181,8 +186,8 @@ const todoTemplate: ReportTemplate = {
   },
   id: "todo",
   layout: {
-    defaultCollapsedSections: ["debug"],
-    sections: ["overview", "judgements", "risk-highlights", "debug"],
+    defaultCollapsedSections: [],
+    sections: ["overview", "judgements", "risk-highlights"],
   },
   nameKey: "template.todo.name",
   scenarios: ["todo"],
@@ -198,7 +203,7 @@ const frontendTemplate: ReportTemplate = {
   id: "frontend",
   layout: {
     defaultCollapsedSections: [],
-    sections: ["overview", "risk-highlights", "debug", "judgements"],
+    sections: ["overview", "risk-highlights", "judgements"],
   },
   nameKey: "template.frontend.name",
   scenarios: ["frontend"],
@@ -211,44 +216,115 @@ function html(template = genericTemplate, locale: "zh-CN" | "en" = "zh-CN") {
 }
 
 describe("JudgementReportPage", () => {
-  it("renders a complete JudgementReport with overview, six final statuses, risks, and debug data", () => {
+  it("renders a complete user-facing report without internal metadata", () => {
     const markup = html();
 
-    expect(markup).toContain("DoneCheck 阶段 5 报告");
-    expect(markup).toContain("需求覆盖率");
+    expect(markup).toContain("DoneCheck 分析报告");
+    expect(markup).toContain("需求达成情况");
     expect(markup).toContain("75%");
-    expect(markup).toContain("承诺覆盖率");
+    expect(markup).toContain("已确认承诺");
     expect(markup).toContain("25%");
-    expect(markup).toContain("范围偏离");
+    expect(markup).toContain("需求之外的改动");
     expect(markup).toContain("17% · 中");
-    expect(markup).toContain("分母: 2");
-    expect(markup).toContain("证据不足剔除: 1");
-    expect(markup).toContain("rules-v1");
-    expect(markup).toContain("2026-06-27T00:00:00.000Z");
-    for (const label of ["已兑现", "部分兑现", "证据不足", "未兑现", "疑似假实现", "需求外范围"]) {
+    expect(markup).toContain("75% · 已评估 2 项 · 共 3 项 · 1 项待补充证据");
+    expect(markup).not.toContain("适用于通用 DoneCheck 复核的均衡报告布局。");
+    expect(markup).toContain('dateTime="2026-06-27T00:00:00.000Z"');
+    for (const label of [
+      "已兑现",
+      "部分兑现",
+      "证据不足",
+      "未兑现",
+      "看似完成但缺少可运行证据",
+      "需求外范围",
+    ]) {
       expect(markup).toContain(label);
     }
-    expect(markup).toContain("疑似假实现");
+    expect(markup).toContain("看似完成但缺少可运行证据");
     expect(markup).toContain("需求外范围");
     expect(markup).toContain("证据不足");
-    expect(markup).toContain("语义草案");
-    expect(markup).toContain("假实现信号");
-    expect(markup).toContain("静态召回信号");
     expect(markup).toContain("类型");
     expect(markup).toContain("需求");
+    for (const internalTerm of ["阶段", "rules-v1", "语义草案", "假实现信号", "静态召回信号"]) {
+      expect(markup).not.toContain(internalTerm);
+    }
+    for (const internalId of report.judgements.map((judgement) => judgement.sourceId)) {
+      expect(markup).not.toContain(internalId);
+    }
+    for (const internalSlug of [
+      "insufficient-evidence",
+      "suspicious-fake-implementation",
+      "extra-scope",
+    ]) {
+      expect(markup).not.toContain(internalSlug);
+    }
   });
 
   it("switches zh-CN and en user-visible copy for the same report", () => {
     const zh = html(genericTemplate, "zh-CN");
     const en = html(genericTemplate, "en");
 
-    expect(zh).toContain("DoneCheck 阶段 5 报告");
-    expect(zh).toContain("疑似假实现");
-    expect(en).toContain("DoneCheck Stage 5 Report");
-    expect(en).toContain("Suspicious Fake Implementation");
-    expect(en).toContain("Fake implementation signals");
-    expect(en).toContain("Confidence Level");
-    expect(en).not.toContain("DoneCheck 阶段 5 报告");
+    expect(zh).toContain("DoneCheck 分析报告");
+    expect(zh).toContain("看似完成但缺少可运行证据");
+    expect(en).toContain("DoneCheck Report");
+    expect(en).toContain("Appears Complete Without Working Evidence");
+    expect(en).toContain("Certainty");
+    for (const internalTerm of [
+      "Stage",
+      "rules-v1",
+      "Semantic Draft",
+      "Static recall signals",
+      "Fake implementation signals",
+      "Source ID",
+    ]) {
+      expect(en).not.toContain(internalTerm);
+    }
+  });
+
+  it("translates missing analysis evidence without exposing internal terminology", () => {
+    expect(translateReasonCode("missing-semantic-draft", "zh-CN")).toBe("没有足够的分析证据");
+    expect(translateReasonCode("missing-semantic-draft", "en")).toBe(
+      "Not enough analysis evidence",
+    );
+  });
+
+  it("renders the consolidated repair prompt directly from the localized report field in desktop and static HTML output", () => {
+    const zh = html(genericTemplate, "zh-CN");
+    const en = html(genericTemplate, "en");
+    const document = createHtmlReportDocument({ locale: "en", report, template: genericTemplate });
+
+    expect(zh).toContain("建议修复说明");
+    expect(zh).toContain("修复未兑现项。");
+    expect(en).toContain("Suggested Fix Instructions");
+    expect(en).toContain("Repair unfulfilled items.");
+    expect(document).toContain("Suggested Fix Instructions");
+    expect(document).toContain("Repair unfulfilled items.");
+    expect(en.indexOf("Overview")).toBeLessThan(en.indexOf("Suggested Fix Instructions"));
+    expect(en.indexOf("Priority Actions")).toBeLessThan(en.indexOf("Suggested Fix Instructions"));
+  });
+
+  it("renders an explicit localized empty state when the consolidated repair prompt content is empty", () => {
+    const reportWithoutPrompt: JudgementReport = {
+      ...report,
+      consolidatedRepairPrompt: {
+        ...report.consolidatedRepairPrompt,
+        content: { "zh-CN": "", en: "" },
+      },
+    };
+
+    expect(
+      renderToStaticMarkup(
+        <JudgementReportPage locale="en" report={reportWithoutPrompt} template={genericTemplate} />,
+      ),
+    ).toContain("No combined fix instructions are available.");
+    expect(
+      renderToStaticMarkup(
+        <JudgementReportPage
+          locale="zh-CN"
+          report={reportWithoutPrompt}
+          template={genericTemplate}
+        />,
+      ),
+    ).toContain("暂无可用的汇总修复说明。");
   });
 
   it("renders semantic repair suggestions visibly in zh-CN and en judgement cards", () => {
@@ -261,17 +337,17 @@ describe("JudgementReportPage", () => {
     expect(en).toContain("No repair needed.");
   });
 
-  it("maps reasonCode to localized display copy instead of exposing raw keys", () => {
+  it("does not expose reason codes in the report", () => {
     const markup = html(genericTemplate, "en");
 
-    expect(markup).toContain("Fake implementation signal detected");
-    expect(markup).toContain("Extra scope detected");
+    expect(markup).not.toContain("Fake implementation signal detected");
+    expect(markup).not.toContain("Extra scope detected");
     expect(markup).not.toContain("fake-implementation-signal-detected");
     expect(markup).not.toContain("extra-scope-detected");
   });
 
   it("falls back safely for unknown reasonCode and missing translation keys", () => {
-    expect(translateReasonCode("unknown-code", "en")).toBe("Unknown reason: unknown-code");
+    expect(translateReasonCode("unknown-code", "en")).toBe("The reason could not be determined");
     const firstJudgement = report.judgements[0] as FinalJudgement;
     // Cast through `unknown` because we are deliberately feeding an invalid
     // reasonCode to assert the runtime fallback. The strict shared
@@ -292,22 +368,20 @@ describe("JudgementReportPage", () => {
       />,
     );
 
-    expect(markup).toContain("Unknown reason: unknown-code");
+    expect(markup).not.toContain("unknown-code");
     expect(markup).toContain("template.missing.name");
   });
 
-  it("localizes internal enum values (kind, confidenceLevel, evidenceStrength, scopeDriftLevel) instead of exposing raw English keys", () => {
+  it("localizes the user-visible item types, confidence, and scope level", () => {
     const zh = html(genericTemplate, "zh-CN");
     const en = html(genericTemplate, "en");
 
     expect(zh).toContain("需求");
     expect(zh).toContain("承诺");
     expect(zh).toContain("高");
-    expect(zh).toContain("强");
     expect(en).toContain("Requirement");
     expect(en).toContain("Claim");
     expect(en).toContain("High");
-    expect(en).toContain("Strong");
   });
 
   it("uses template configuration to change section order and highlighted items without mutating report data", () => {
@@ -316,9 +390,9 @@ describe("JudgementReportPage", () => {
     const todo = html(todoTemplate, "en");
     const frontend = html(frontendTemplate, "en");
 
-    expect(generic.indexOf("Risk Highlights")).toBeLessThan(generic.indexOf("Judgements"));
-    expect(todo.indexOf("Judgements")).toBeLessThan(todo.indexOf("Risk Highlights"));
-    expect(frontend.indexOf("Debug Details")).toBeLessThan(frontend.indexOf("Judgements"));
+    expect(generic.indexOf("Priority Actions")).toBeLessThan(generic.indexOf("Findings"));
+    expect(todo.indexOf("Priority Actions")).toBeLessThan(todo.indexOf("Findings"));
+    expect(frontend).not.toContain("Debug Details");
     expect(generic).toContain('data-highlighted="true"');
     expect(JSON.stringify(report)).toBe(before);
   });
@@ -328,10 +402,9 @@ describe("JudgementReportPage", () => {
     const todo = html(todoTemplate, "en");
 
     const riskSection = (markup: string) => {
-      const start = markup.indexOf("Risk Highlights");
-      const judgementsIdx = markup.indexOf("Judgements", start + 1);
-      const debugIdx = markup.indexOf("Debug Details", start + 1);
-      const candidates = [judgementsIdx, debugIdx].filter((idx) => idx !== -1);
+      const start = markup.indexOf("Priority Actions");
+      const findingsIdx = markup.indexOf("Findings", start + 1);
+      const candidates = [findingsIdx].filter((idx) => idx !== -1);
       const end = candidates.length > 0 ? Math.min(...candidates) : markup.length;
       return markup.slice(start, end);
     };
@@ -339,13 +412,13 @@ describe("JudgementReportPage", () => {
     const genericRisk = riskSection(generic);
     const todoRisk = riskSection(todo);
 
-    expect(genericRisk).toContain("Suspicious Fake Implementation");
+    expect(genericRisk).toContain("Appears Complete Without Working Evidence");
     expect(genericRisk).toContain("Extra Scope");
     expect(genericRisk).not.toContain("Partial");
 
     expect(todoRisk).toContain("Partial");
     expect(todoRisk).toContain("Unfulfilled");
-    expect(todoRisk).not.toContain("Suspicious Fake Implementation");
+    expect(todoRisk).not.toContain("Appears Complete Without Working Evidence");
   });
 
   it("keeps ReportSummary as a compatibility wrapper for legacy DoneCheckResult", () => {
@@ -379,8 +452,22 @@ describe("createHtmlReportDocument", () => {
 
     expect(document).toContain("<!doctype html>");
     expect(document).toContain('<html lang="en">');
-    expect(document).toContain("DoneCheck Stage 5 Report");
-    expect(document).toContain("Fake implementation signal detected");
+    expect(document).toContain("DoneCheck Report");
+    expect(document).not.toContain("Stage");
+    expect(document).not.toContain("rules-v1");
+    expect(document).not.toContain("Fake implementation signal detected");
+    expect(document).not.toContain("Source ID");
+    expect(document).not.toMatch(/letter-spacing:\s*-/u);
+    for (const internalSlug of [
+      "insufficient-evidence",
+      "suspicious-fake-implementation",
+      "extra-scope",
+    ]) {
+      expect(document).not.toContain(internalSlug);
+    }
+    for (const internalId of report.judgements.map((judgement) => judgement.sourceId)) {
+      expect(document).not.toContain(internalId);
+    }
   });
 });
 
@@ -475,8 +562,7 @@ describe("integration with @donecheck/core/rules", () => {
       <JudgementReportPage locale="en" report={realReport} template={genericTemplate} />,
     );
 
-    // The rules-version literal and timestamp must round-trip into the DOM.
-    expect(markup).toContain("rules-v1");
+    expect(markup).not.toContain("rules-v1");
     expect(markup).toContain("2026-06-27T00:00:00.000Z");
 
     // Every finalStatus that the engine can emit must be rendered using the
@@ -486,15 +572,17 @@ describe("integration with @donecheck/core/rules", () => {
       "Fulfilled",
       "Insufficient Evidence",
       "Unfulfilled",
-      "Suspicious Fake Implementation",
+      "Appears Complete Without Working Evidence",
       "Extra Scope",
     ]) {
       expect(markup).toContain(label);
     }
 
-    // The reasonCode -> localized copy mapping must work for real outputs.
-    expect(markup).toContain("Fake implementation signal detected");
-    expect(markup).toContain("Extra scope detected");
+    expect(markup).not.toContain("fake-implementation-signal-detected");
+    expect(markup).not.toContain("extra-scope-detected");
+    for (const judgement of realReport.judgements) {
+      expect(markup).not.toContain(judgement.sourceId);
+    }
 
     // The real `buildExplanation` strings must survive into the DOM. If
     // core/rules ever changes its explanation format, this assertion keeps
@@ -547,9 +635,9 @@ describe("integration with @donecheck/core/rules", () => {
       <JudgementReportPage locale="zh-CN" report={realReport} template={genericTemplate} />,
     );
 
-    expect(markup).toContain("DoneCheck 阶段 5 报告");
+    expect(markup).toContain("DoneCheck 分析报告");
     expect(markup).toContain("已兑现");
-    expect(markup).toContain("强证据支持已兑现");
-    expect(markup).toContain("rules-v1");
+    expect(markup).not.toContain("rules-v1");
+    expect(markup).not.toContain("阶段");
   });
 });

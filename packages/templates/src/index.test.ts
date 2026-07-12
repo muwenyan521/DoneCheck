@@ -25,7 +25,7 @@ describe("reportTemplates", () => {
     expect(frontend).toBeDefined();
 
     expect(generic?.layout.sections).not.toEqual(todo?.layout.sections);
-    expect(todo?.layout.defaultCollapsedSections).toContain("debug");
+    expect(todo?.layout.defaultCollapsedSections).toEqual([]);
     expect(frontend?.highlights.reasonCodes).toContain("fake-implementation-signal-detected");
     expect(generic && "checks" in generic).toBe(false);
     expect(todo && "checks" in todo).toBe(false);

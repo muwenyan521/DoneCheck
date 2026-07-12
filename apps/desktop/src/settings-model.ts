@@ -6,13 +6,11 @@ export interface DesktopSettings {
   readonly providerMode: ProviderMode;
   readonly providerBaseUrl: string;
   readonly providerModel: string;
-  readonly structuredOutputStrict: boolean;
   readonly topK: number;
   readonly ignore: readonly string[];
   readonly confirmRequirementDecomposition: boolean;
   readonly locale: Locale;
   readonly templateId: ReportTemplateId;
-  readonly showDebugSections: boolean;
   readonly defaultWorkspaceDir: string | null;
   readonly autoSaveHistory: boolean;
   readonly reopenLastWorkspace: boolean;
@@ -32,8 +30,6 @@ export const defaultDesktopSettings: DesktopSettings = {
   providerModel: "",
   recentWorkspaces: [],
   reopenLastWorkspace: false,
-  showDebugSections: false,
-  structuredOutputStrict: true,
   templateId: "generic",
   topK: 5,
 };

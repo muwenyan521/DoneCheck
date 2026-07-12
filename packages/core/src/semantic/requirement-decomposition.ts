@@ -13,6 +13,7 @@ export interface DecomposeRequirementsInput {
   readonly provider: LLMProvider;
   readonly requirement: string;
   readonly retry?: RetryOptions;
+  readonly signal?: AbortSignal;
 }
 
 export async function decomposeRequirements(
@@ -28,8 +29,9 @@ export async function decomposeRequirements(
         prompt,
         schema: requirementDecompositionOutputSchema,
         schemaName: "RequirementDecompositionOutput",
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
-    input.retry,
+    { ...input.retry, ...(input.signal === undefined ? {} : { signal: input.signal }) },
   );
 
   const parsed = requirementDecompositionOutputSchema.parse(response.object);
@@ -63,13 +65,27 @@ export function stabilizeRequirementDecomposition(
   const warnings = [...(input.output.warnings ?? []), ...requirements.warnings, ...claims.warnings];
 
   return {
-    assumptions: input.output.assumptions ?? [],
+    assumptions: sanitizeReviewNotes(input.output.assumptions ?? []),
     claims: claims.items,
-    clarifyingQuestions: input.output.clarifyingQuestions ?? [],
+    clarifyingQuestions: sanitizeReviewNotes(input.output.clarifyingQuestions ?? []),
     ...(input.output.confidence === undefined ? {} : { confidence: input.output.confidence }),
     requirements: requirements.items,
     warnings: dedupStrings(warnings),
   };
+}
+
+function sanitizeReviewNotes(items: readonly string[]): string[] {
+  return dedupStrings(
+    items
+      .map((item) =>
+        item
+          .replace(/\b(?:REQ|CLAIM)-[A-Z0-9_-]+\s*[:：-]\s*/giu, "")
+          .replace(/\b(?:REQ|CLAIM)-[A-Z0-9_-]+\b/giu, "this item")
+          .replace(/\s+/gu, " ")
+          .trim(),
+      )
+      .filter((item) => item.length > 0),
+  );
 }
 
 interface StabilizeItemsInput<T extends { readonly id: string; readonly text: string }> {

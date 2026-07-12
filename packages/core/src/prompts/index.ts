@@ -19,3 +19,8 @@ export {
   requirementDecompositionPromptContract,
   requirementDecompositionSystemPromptTemplate,
 } from "./requirement-decomposition.js";
+export {
+  REPAIR_PROMPT_VERSION,
+  type BuildConsolidatedRepairPromptOptions,
+  buildConsolidatedRepairPrompt,
+} from "./repair.js";

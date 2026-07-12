@@ -1,3 +1,4 @@
+import { buildConsolidatedRepairPrompt } from "../prompts/index.js";
 import type { SemanticJudgementDraft } from "../semantic/schema.js";
 import {
   type CoverageInputItem,
@@ -95,6 +96,13 @@ export function buildJudgementReport(input: EvaluateJudgementsInput): JudgementR
   const summaryStats = summarizeStatuses(judgements);
   const report = {
     claimCoverage: calculateCoverage(judgements.filter((judgement) => judgement.kind === "claim")),
+    consolidatedRepairPrompt: buildConsolidatedRepairPrompt(judgements, {
+      sourceTexts: Object.fromEntries([
+        ...parsed.requirements.map((requirement) => [requirement.id, requirement.text]),
+        ...parsed.claims.map((claim) => [claim.id, claim.text]),
+        ...parsed.extraScopeCandidates.map((candidate) => [candidate.sourceId, candidate.summary]),
+      ]),
+    }),
     generatedAt,
     judgements,
     requirementCoverage: calculateCoverage(
@@ -131,7 +139,7 @@ export function evaluateFinalJudgement(input: EvaluateFinalJudgementInput): Fina
     confidenceLevel: confidenceLevel(confidence),
     evidenceRefs:
       input.extraScopeCandidate?.evidenceRefs ?? input.semanticDraft?.evidenceRefs ?? [],
-    explanation: buildExplanation(selection.finalStatus, selection.reasonCode),
+    explanation: buildExplanation(selection.reasonCode),
     finalStatus: selection.finalStatus,
     id: input.item.id,
     kind: input.item.kind,
@@ -213,14 +221,14 @@ function selectStatus(input: {
   if (input.extraScopeCandidatePresent) {
     return { finalStatus: "extra-scope", reasonCode: "extra-scope-detected" };
   }
-  if (hasConfirmedFakeSignal(input.fakeImplementationSignals)) {
+  if (input.semanticDraft === undefined) {
+    return { finalStatus: "insufficient-evidence", reasonCode: "missing-semantic-draft" };
+  }
+  if (hasConfirmedFakeSignal(input.fakeImplementationSignals, input.semanticDraft)) {
     return {
       finalStatus: "suspicious-fake-implementation",
       reasonCode: "fake-implementation-signal-detected",
     };
-  }
-  if (input.semanticDraft === undefined) {
-    return { finalStatus: "insufficient-evidence", reasonCode: "missing-semantic-draft" };
   }
   if (isWeakOrUnstable(input.semanticDraft, input.evidenceStrength)) {
     return { finalStatus: "insufficient-evidence", reasonCode: "weak-or-unstable-evidence" };
@@ -262,14 +270,39 @@ function calculateEvidenceStrength(
   return "none";
 }
 
-function hasConfirmedFakeSignal(signals: readonly FakeImplementationSignal[]): boolean {
-  return signals.some((signal) => signal.strength === "medium" || signal.strength === "strong");
+function hasConfirmedFakeSignal(
+  signals: readonly FakeImplementationSignal[],
+  draft: SemanticJudgementDraft,
+): boolean {
+  const implementationPaths = new Set(
+    draft.evidenceRefs
+      .map((ref) => ref.filePath)
+      .filter((filePath) => isImplementationSource(filePath)),
+  );
+  return signals.some(
+    (signal) =>
+      draft.judgementDraft === "suspicious" &&
+      implementationPaths.has(signal.filePath) &&
+      (signal.strength === "medium" || signal.strength === "strong"),
+  );
+}
+
+function isImplementationSource(filePath: string): boolean {
+  return /\.(?:[cm]?[jt]sx?|py|rs|go|java|kt|kts|cs|cpp|cc|c|h|hpp|php|rb|swift|dart|ex|exs|vue|svelte|html|css|scss|sass|less)$/i.test(
+    filePath,
+  );
 }
 
 function isWeakOrUnstable(
   draft: SemanticJudgementDraft,
   evidenceStrength: EvidenceStrength,
 ): boolean {
+  if (
+    draft.judgementDraft === "suspicious" &&
+    (evidenceStrength === "none" || evidenceStrength === "weak")
+  ) {
+    return true;
+  }
   if (draft.confidence < 0.45) return true;
   if (draft.confidence < 0.6 && (evidenceStrength === "none" || evidenceStrength === "weak")) {
     return true;
@@ -295,7 +328,8 @@ function calculateConfidence(
   const statusModifier =
     status === "insufficient-evidence" ? -0.12 : status === "extra-scope" ? 0 : 0.02;
 
-  return clampScore(base + modifier + statusModifier);
+  const confidence = clampScore(base + modifier + statusModifier);
+  return status === "insufficient-evidence" ? Math.min(confidence, 0.59) : confidence;
 }
 
 function confidenceLevel(confidence: number): "low" | "medium" | "high" {
@@ -411,9 +445,7 @@ function summarizeStatuses(judgements: readonly FinalJudgement[]): SummaryStats 
 function buildWarnings(judgements: readonly FinalJudgement[]): string[] {
   const warnings = new Set<string>();
   if (judgements.some((judgement) => judgement.finalStatus === "insufficient-evidence")) {
-    warnings.add(
-      "Some items were excluded from coverage denominators due to insufficient evidence.",
-    );
+    warnings.add("Some items still need more evidence before they can be assessed.");
   }
   if (judgements.some((judgement) => judgement.signals.evidenceStrength === "weak")) {
     warnings.add("Some items rely only on weak static evidence.");
@@ -421,8 +453,26 @@ function buildWarnings(judgements: readonly FinalJudgement[]): string[] {
   return [...warnings];
 }
 
-function buildExplanation(status: FinalStatus, reasonCode: ReasonCode): string {
-  return `${status} selected by ${RULE_ENGINE_VERSION} because ${reasonCode}.`;
+const explanations: Record<ReasonCode, string> = {
+  "extra-scope-detected": "This work appears outside the requested scope.",
+  "fake-implementation-signal-detected":
+    "The available evidence suggests that this behavior may not be functional yet.",
+  "missing-semantic-draft": "There is not enough evidence to verify this item.",
+  "semantic-fulfilled-with-incomplete-evidence":
+    "This item appears complete, but some supporting evidence is incomplete.",
+  "semantic-fulfilled-with-strong-evidence":
+    "The available evidence supports that this item is complete.",
+  "semantic-partial-with-supporting-evidence":
+    "The available evidence supports only part of this item.",
+  "semantic-unsupported-without-static-support":
+    "No implementation evidence was found for this item.",
+  "suspicious-without-confirmed-fake-signal":
+    "The implementation is uncertain and needs further verification.",
+  "weak-or-unstable-evidence": "The available evidence is too weak to verify this item.",
+};
+
+function buildExplanation(reasonCode: ReasonCode): string {
+  return explanations[reasonCode];
 }
 
 function clampScore(score: number): number {

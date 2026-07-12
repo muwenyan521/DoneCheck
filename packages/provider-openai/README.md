@@ -32,7 +32,9 @@ const provider = createProvider();
 ```
 
 - Returns `OpenAIProvider` when `OPENAI_API_KEY` is set.
-- Falls back to a deterministic mock provider (warns to stderr) when the key is missing — useful for local dry-runs and CI smoke without a real key.
+- Throws `ProviderConfigError` when the key is missing. It does not silently return a mock provider.
+
+The CLI owns its explicit `--mock` local demo mode. It generates sample data for offline workflow checks and does not represent an external provider result.
 
 ## Notes
 

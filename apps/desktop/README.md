@@ -1,6 +1,6 @@
 # DoneCheck Desktop Packaging
 
-DoneCheck Desktop packaging is explicit and opt-in. The default root `pnpm verify`, `pnpm build`, and package tests do not run Electron packaging, `electron-builder`, or Electron ABI rebuilds.
+DoneCheck Desktop packaging is explicit and opt-in. The default root `pnpm verify`, `pnpm build`, and package tests do not run Electron packaging, `electron-builder`, or Electron ABI rebuilds. Electron, `@electron/rebuild`, and `electron-builder` are already declared in this workspace's devDependencies.
 
 ## Dev Electron ABI Startup
 
@@ -12,13 +12,13 @@ Interactive start (opens a window, close it manually to restore the Node ABI):
 nix develop -c pnpm --filter @donecheck/desktop electron:start:real
 ```
 
-Self-quitting GUI smoke (no provider key required, exits 0 on success, writes a ready file with renderer-load and native-storage results):
+Self-quitting real GUI smoke (no provider key required, exits 0 on success, writes a ready file with renderer-load and native-storage results):
 
 ```bash
 nix develop -c pnpm --filter @donecheck/desktop electron:gui:smoke
 ```
 
-Both scripts restore the Node ABI via `pnpm rebuild:node` in their `finally` block, so subsequent Node tests keep passing without manual cleanup. The smoke path sets `DONECHECK_GUI_SMOKE`, `DONECHECK_GUI_SMOKE_READY_FILE`, and `DONECHECK_GUI_SMOKE_STORAGE_FILE` so the main process loads the real renderer, runs a real settings storage roundtrip, writes a JSON ready file, and auto-quits. It fails when the renderer does not load, when the storage roundtrip fails, or when the ready file is missing.
+Both scripts restore the Node ABI via `pnpm rebuild:node` in their `finally` block, so subsequent Node tests keep passing without manual cleanup. The GUI smoke path sets `DONECHECK_GUI_SMOKE`, `DONECHECK_GUI_SMOKE_READY_FILE`, and `DONECHECK_GUI_SMOKE_STORAGE_FILE` so the main process loads the real renderer, runs a real settings storage roundtrip, writes a JSON ready file, and auto-quits. It fails when the renderer does not load, when the storage roundtrip fails, or when the ready file is missing. This is distinct from `test:mocked-smoke`, which uses a mocked Electron module, and from `electron:smoke`, which checks only the real Electron shell.
 
 ## Linux Packaging
 

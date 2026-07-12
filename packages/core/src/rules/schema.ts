@@ -15,7 +15,7 @@ import {
   semanticRequirementSchema,
 } from "../semantic/schema.js";
 
-// Stage 4 report contracts live in `@donecheck/shared` so that consumers
+// Shared report contracts live in `@donecheck/shared` so that consumers
 // (report-ui, future GUI, export tooling) can `import type` the authoritative
 // report shape without taking a runtime dependency on `core`. We re-export
 // them here so existing imports from `./schema.js` keep working.

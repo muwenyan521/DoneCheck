@@ -1,6 +1,7 @@
 import type { JudgementReport } from "@donecheck/core";
 import type { ReportTemplateId } from "@donecheck/shared";
 import type { CredentialStatus } from "./desktop-provider.js";
+import type { ProviderErrorKind } from "./provider-error-kind.js";
 import type { DesktopSettings, DesktopSettingsPatch } from "./settings-store.js";
 
 export type { JudgementReport } from "@donecheck/core";
@@ -13,6 +14,7 @@ export type Locale = "en" | "zh-CN";
 export const DESKTOP_API_KEYS = [
   "donecheck:decompose",
   "donecheck:analyze",
+  "donecheck:cancel-analysis",
   "donecheck:render-html",
   "donecheck:select-workspace",
   "donecheck:export-html",
@@ -20,20 +22,31 @@ export const DESKTOP_API_KEYS = [
   "donecheck:history:get",
   "donecheck:history:save",
   "donecheck:history:delete",
+  "donecheck:history:restore",
+  "donecheck:history:clear",
   "donecheck:settings:get",
   "donecheck:settings:set",
   "donecheck:settings:reset",
   "donecheck:credentials:set-session-api-key",
   "donecheck:credentials:clear-session-api-key",
   "donecheck:credentials:status",
+  "donecheck:clipboard:copy-repair-prompt",
 ] as const;
 
 export type DesktopApiChannel = (typeof DESKTOP_API_KEYS)[number];
 
-export interface DesktopIpcError {
-  readonly code: "invalid-input" | "not-implemented" | "unknown";
+export interface DesktopIpcBasicError {
+  readonly code: "canceled" | "invalid-input" | "not-implemented" | "unknown";
   readonly message: string;
 }
+
+export interface DesktopIpcProviderError {
+  readonly code: "provider-error";
+  readonly message: "Online analysis could not be completed.";
+  readonly providerErrorKind: ProviderErrorKind;
+}
+
+export type DesktopIpcError = DesktopIpcBasicError | DesktopIpcProviderError;
 
 export type DesktopIpcResult<T> =
   | { readonly ok: true; readonly data: T }
@@ -45,6 +58,7 @@ export interface DecomposeItem {
 }
 
 export interface DecomposeRequest {
+  readonly requestId: string;
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
@@ -60,6 +74,7 @@ export interface DecomposeResponse {
 }
 
 export interface AnalyzeRequest {
+  readonly requestId: string;
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
@@ -97,6 +112,10 @@ export interface ExportHtmlResponse {
   readonly filePath?: string;
 }
 
+export interface CopyRepairPromptRequest {
+  readonly text: string;
+}
+
 export interface HistorySummary {
   readonly id: string;
   readonly createdAt: string;
@@ -122,11 +141,19 @@ export interface HistoryDeleteRequest {
   readonly id: string;
 }
 
+export interface HistoryRestoreRequest {
+  readonly id: string;
+}
+
 export interface DesktopHistoryApi {
   list(): Promise<DesktopIpcResult<readonly HistorySummary[]>>;
   get(request: HistoryGetRequest): Promise<DesktopIpcResult<HistoryEntry | undefined>>;
   save(request: HistorySaveRequest): Promise<DesktopIpcResult<HistoryEntry>>;
   delete(request: HistoryDeleteRequest): Promise<DesktopIpcResult<{ readonly deleted: boolean }>>;
+  restore(
+    request: HistoryRestoreRequest,
+  ): Promise<DesktopIpcResult<{ readonly restored: boolean }>>;
+  clear(): Promise<DesktopIpcResult<{ readonly cleared: number }>>;
 }
 
 export interface SettingsSetRequest {
@@ -158,9 +185,11 @@ export interface DesktopCredentialsApi {
 export interface DesktopApi {
   decompose(request: DecomposeRequest): Promise<DesktopIpcResult<DecomposeResponse>>;
   analyze(request: AnalyzeRequest): Promise<DesktopIpcResult<JudgementReport>>;
+  cancelAnalysis(request: { readonly requestId: string }): Promise<DesktopIpcResult<void>>;
   renderHtml(request: RenderHtmlRequest): Promise<DesktopIpcResult<RenderHtmlResponse>>;
   selectWorkspace(): Promise<DesktopIpcResult<SelectWorkspaceResponse>>;
   exportHtml(request: ExportHtmlRequest): Promise<DesktopIpcResult<ExportHtmlResponse>>;
+  copyRepairPrompt(request: CopyRepairPromptRequest): Promise<DesktopIpcResult<void>>;
   readonly history: DesktopHistoryApi;
   readonly settings: DesktopSettingsApi;
   readonly credentials: DesktopCredentialsApi;

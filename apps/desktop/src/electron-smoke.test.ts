@@ -4,13 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 
 let windowCount = 0;
 const handledChannels: string[] = [];
+const ipcHandlers = new Map<string, (event: unknown, ...args: never[]) => unknown>();
 const loadedFiles: string[] = [];
 const browserWindowOptions: unknown[] = [];
+const clipboardWrites: string[] = [];
 let queriedWindows = false;
 
 vi.mock("electron", () => ({
   app: {
-    getPath: (name: string) => (name === "userData" ? ":memory:" : "/tmp"),
+    getPath: () => "/tmp",
     whenReady: () => Promise.resolve(),
     on: () => {},
     quit: () => {},
@@ -37,7 +39,13 @@ vi.mock("electron", () => ({
       return Promise.resolve();
     }
   },
-  ipcMain: { handle: (channel: string) => handledChannels.push(channel) },
+  ipcMain: {
+    handle: (channel: string, handler: (event: unknown, ...args: never[]) => unknown) => {
+      handledChannels.push(channel);
+      ipcHandlers.set(channel, handler);
+    },
+  },
+  clipboard: { writeText: (text: string) => clipboardWrites.push(text) },
   contextBridge: { exposeInMainWorld: () => {} },
   ipcRenderer: { invoke: () => Promise.resolve() },
 }));
@@ -70,7 +78,7 @@ describe("electron skeleton", () => {
     );
   });
 
-  it("preload exposes typed channel keys for analyze, render-html, and history signatures", async () => {
+  it("preload exposes only typed channel keys, including the narrow repair prompt clipboard signature", async () => {
     const mod = await import("./preload.js");
     expect(mod.DESKTOP_API_KEYS).toEqual(
       expect.arrayContaining([
@@ -82,8 +90,29 @@ describe("electron skeleton", () => {
         "donecheck:history:get",
         "donecheck:history:save",
         "donecheck:history:delete",
+        "donecheck:clipboard:copy-repair-prompt",
       ]),
     );
+    expect(mod.DESKTOP_API_KEYS).not.toContain("donecheck:clipboard:write-text");
+  });
+
+  it("registers the dedicated clipboard channel without exposing arbitrary clipboard APIs", async () => {
+    handledChannels.length = 0;
+    clipboardWrites.length = 0;
+    const mod = await import("./ipc.js");
+    mod.registerIpcHandlers("file:///tmp/renderer/index.html");
+    expect(handledChannels).toContain("donecheck:clipboard:copy-repair-prompt");
+    expect(handledChannels).not.toContain("donecheck:clipboard:write-text");
+    const handler = ipcHandlers.get("donecheck:clipboard:copy-repair-prompt");
+    await expect(
+      handler?.({ senderFrame: { url: "file:///tmp/renderer/index.html" } }, {
+        text: "Copy this exact repair prompt.",
+      } as never),
+    ).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    });
+    expect(clipboardWrites).toEqual(["Copy this exact repair prompt."]);
   });
 
   it("renderer/index.html exists and references donecheck", () => {

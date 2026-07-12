@@ -37,6 +37,25 @@ function fallbackClient(contents: readonly string[], calls: unknown[]) {
 }
 
 describe("OpenAIProvider", () => {
+  it("uses a bounded request timeout and leaves retries to the core pipeline", () => {
+    const config = resolveOpenAIProviderConfig({ apiKey: "sk-test" });
+    expect(config.requestTimeoutMs).toBe(120_000);
+
+    const provider = new OpenAIProvider({ apiKey: "sk-test" });
+    const client = (provider as unknown as { client: OpenAIClientSettings }).client;
+    expect(client.timeout).toBe(120_000);
+    expect(client.maxRetries).toBe(0);
+  });
+
+  it("accepts an explicit positive request timeout", () => {
+    expect(
+      resolveOpenAIProviderConfig({ apiKey: "sk-test", requestTimeoutMs: 45_000 }),
+    ).toMatchObject({ requestTimeoutMs: 45_000 });
+    expect(() => resolveOpenAIProviderConfig({ apiKey: "sk-test", requestTimeoutMs: 0 })).toThrow(
+      ProviderConfigError,
+    );
+  });
+
   it("throws ProviderConfigError when OPENAI_API_KEY missing", () => {
     const old = process.env.OPENAI_API_KEY;
     // biome-ignore lint/performance/noDelete: env vars must be deleted, not set to undefined
@@ -628,6 +647,7 @@ describe("OpenAIProvider", () => {
         apiKeySource: "OPENAI_API_KEY",
         baseURL: "https://example.test/v1",
         model: "gpt-test",
+        requestTimeoutMs: 120_000,
         structuredOutputStrict: true,
       });
     } finally {
@@ -652,6 +672,7 @@ describe("OpenAIProvider", () => {
         apiKeySource: "options.apiKey",
         baseURL: "https://explicit.test/v1",
         model: "explicit-model",
+        requestTimeoutMs: 120_000,
         structuredOutputStrict: true,
       });
     } finally {
@@ -659,6 +680,11 @@ describe("OpenAIProvider", () => {
     }
   });
 });
+
+interface OpenAIClientSettings {
+  readonly maxRetries: number;
+  readonly timeout: number;
+}
 
 describe("createDeterministicMockProvider", () => {
   it("decomposes marked requirements and claims with continuation lines", async () => {
@@ -694,6 +720,7 @@ describe("createDeterministicMockProvider", () => {
       { id: "CLAIM-1", text: "Login is done." },
       { id: "CLAIM-2", text: "Todo list is partly done." },
     ]);
+    expect(result.object.warnings).toEqual([]);
   });
 
   it("falls back to one requirement and one claim when markers are absent", async () => {
@@ -718,6 +745,7 @@ describe("createDeterministicMockProvider", () => {
 
     expect(result.object.requirements).toEqual([{ id: "REQ-1", text: "Build a todo app." }]);
     expect(result.object.claims).toEqual([{ id: "CLAIM-1", text: "I built it." }]);
+    expect(result.object.warnings).toEqual([]);
   });
 
   it("selects static-signal files and returns semantic evidence refs from real prompt snippets", async () => {

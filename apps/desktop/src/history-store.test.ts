@@ -40,11 +40,44 @@ describe("history store", () => {
     const loaded = store.get({ id: saved.id });
     expect(loaded?.report).toEqual(report);
 
+    const duplicate = store.save({
+      report,
+      requirement:
+        "Users can log in, persist sessions, recover failed attempts, and avoid unrelated profile rewrites.",
+      workspaceDir: "/workspace/demo",
+    });
+    expect(duplicate.id).toBe(saved.id);
+    expect(store.list()).toHaveLength(1);
+
     expect(store.delete({ id: saved.id })).toEqual({ deleted: true });
     expect(store.list().some((entry) => entry.id === saved.id)).toBe(false);
     expect(store.get({ id: saved.id })).toBeUndefined();
     expect(store.delete({ id: saved.id })).toEqual({ deleted: false });
+    expect(store.restore({ id: saved.id })).toEqual({ restored: true });
+    expect(store.get({ id: saved.id })?.report).toEqual(report);
+    expect(store.restore({ id: saved.id })).toEqual({ restored: false });
 
+    store.close();
+  });
+
+  it("permanently clears active and recently removed reports", () => {
+    const store = createHistoryStore({ databasePath: ":memory:" });
+    const first = store.save({
+      report: buildRichReport(),
+      requirement: "first",
+      workspaceDir: "/workspace/first",
+    });
+    store.save({
+      report: buildRichReport(),
+      requirement: "second",
+      workspaceDir: "/workspace/second",
+    });
+    store.delete({ id: first.id });
+
+    expect(store.clear()).toEqual({ cleared: 2 });
+    expect(store.list()).toEqual([]);
+    expect(store.restore({ id: first.id })).toEqual({ restored: false });
+    expect(store.clear()).toEqual({ cleared: 0 });
     store.close();
   });
 });
@@ -57,6 +90,11 @@ function buildRichReport(): JudgementReport {
       score: 0.58,
       totalItems: 6,
       weightedFulfilled: 2.9,
+    },
+    consolidatedRepairPrompt: {
+      content: { "zh-CN": "修复未兑现项。", en: "Repair unfulfilled items." },
+      includedJudgementIds: ["J-REQ-2", "J-REQ-3", "J-REQ-4", "J-REQ-5", "J-EXTRA-1"],
+      version: "repair-v1",
     },
     generatedAt: "2026-07-01T00:00:00.000Z",
     judgements: [

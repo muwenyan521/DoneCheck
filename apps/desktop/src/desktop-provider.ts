@@ -38,7 +38,6 @@ export interface DesktopProviderConfig {
   readonly apiKeySource: "session" | "env";
   readonly baseURL?: string;
   readonly model: string;
-  readonly structuredOutputStrict: boolean;
 }
 
 export interface DesktopProviderFactory {
@@ -52,8 +51,7 @@ export interface DesktopProviderFactoryOptions {
   readonly getSettings: () => DesktopSettings;
 }
 
-const missingOpenAICompatibleKeyMessage =
-  "OpenAI-compatible mode requires an API key. Enter a session key, set OPENAI_API_KEY, or switch to Deterministic mock.";
+const missingOpenAICompatibleKeyMessage = "Online analysis requires an access key.";
 
 export function createSessionCredentialStore(): SessionCredentialStore {
   let sessionApiKey: string | undefined;
@@ -94,7 +92,7 @@ export function createDesktopProviderFactory(
       return new OpenAIProvider({
         client,
         model: config.model,
-        structuredOutputStrict: config.structuredOutputStrict,
+        structuredOutputStrict: true,
       });
     },
     getCredentialStatus: () => options.credentials.getStatus(),
@@ -120,7 +118,6 @@ function resolveOpenAICompatibleConfig(
     ...(baseURL === undefined ? {} : { baseURL }),
     model: firstNonEmpty(settings.providerModel, process.env.OPENAI_MODEL) ?? "gpt-4o-mini",
     providerMode: "openai-compatible",
-    structuredOutputStrict: settings.structuredOutputStrict,
   };
 }
 

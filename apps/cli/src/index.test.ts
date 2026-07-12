@@ -2,11 +2,24 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GenerateObjectInput, GenerateObjectResult, LLMProvider } from "@donecheck/core";
-import { judgementReportSchema, parseDoneCheckResult } from "@donecheck/shared";
+import { parseDoneCheckResult } from "@donecheck/shared";
 import { describe, expect, it } from "vitest";
 import { runCli } from "./index.js";
 
-describe("runCli --legacy", () => {
+describe("runCli --text-only", () => {
+  it("prints CLI help without requiring analysis input", async () => {
+    const result = await run(["--help"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("--workspace <path>");
+    expect(result.stdout).toContain("--text-only");
+    expect(result.stdout).not.toContain("--legacy");
+    expect(result.stdout).not.toContain("--version");
+    expect(result.stdout).not.toMatch(/\b\d+\.\d+\.\d+\b/u);
+    expect(result.stdout).not.toMatch(/JudgementReport|deterministic mock|legacy result pipeline/);
+  });
+
   it("runs legacy analysis and exits 0 for pass", async () => {
     const result = await run([
       "--requirement",
@@ -64,6 +77,7 @@ describe("runCli --legacy", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(parseDoneCheckResult(JSON.parse(result.stdout)).status).toBe("pass");
+    expect(result.stdout).not.toMatch(/\b\d+\.\d+\.\d+\b/u);
   });
 
   it("reads evidence from stdin when no explicit evidence is provided", async () => {
@@ -130,9 +144,9 @@ describe("runCli default (real pipeline)", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe("");
+      expect(result.stderr).toBe("Analyzing requirements...\nReviewing workspace evidence...\n");
       const parsed = JSON.parse(result.stdout);
-      expect(judgementReportSchema.parse(parsed)).toEqual(parsed);
+      expectPublicReport(parsed, result.stdout);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -157,7 +171,7 @@ describe("runCli default (real pipeline)", () => {
 
       expect(result.stderr).toContain("mock");
       const parsed = JSON.parse(result.stdout);
-      expect(parsed.version).toBe("rules-v1");
+      expectPublicReport(parsed, result.stdout);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       if (old !== undefined) process.env.OPENAI_API_KEY = old;
@@ -205,23 +219,23 @@ describe("runCli --rules / --html", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe("");
+      expect(result.stderr).toBe("Analyzing requirements...\nReviewing workspace evidence...\n");
       const parsed = JSON.parse(result.stdout);
-      expect(judgementReportSchema.parse(parsed)).toEqual(parsed);
+      expectPublicReport(parsed, result.stdout);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
   });
 
-  it("returns 0 for --rules structural demo output even when report contains findings", async () => {
+  it("uses judgement report exit status for --rules output", async () => {
     const workspace = createTempWorkspace();
     try {
       const result = await run(
         [
           "--requirement",
-          "REQ-1: Implement app module",
+          "Implement app module",
           "--evidence",
-          "CLAIM-1: App module is implemented",
+          "App module is implemented",
           "--rules",
           "--workspace",
           workspace,
@@ -229,10 +243,51 @@ describe("runCli --rules / --html", () => {
         { provider: findingProvider },
       );
 
-      expect(result.exitCode).toBe(0);
-      expect(judgementReportSchema.parse(JSON.parse(result.stdout)).summaryStats).toMatchObject({
-        unfulfilled: 2,
-      });
+      expect(result.exitCode).toBe(1);
+      expectPublicReport(JSON.parse(result.stdout), result.stdout);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 2 for an invalid workspace before invoking the provider", async () => {
+    let calls = 0;
+    const provider: LLMProvider = {
+      generateObject: async () => {
+        calls += 1;
+        throw new Error("called");
+      },
+    };
+    const result = await run(
+      ["--requirement", "x", "--evidence", "y", "--workspace", "/missing/donecheck-workspace"],
+      { provider },
+    );
+    expect(result.exitCode).toBe(2);
+    expect(calls).toBe(0);
+    expect(result.stderr).toContain("Workspace");
+  });
+
+  it("does not expose raw analysis service errors", async () => {
+    const workspace = createTempWorkspace();
+    const provider: LLMProvider = {
+      generateObject: async () => {
+        throw new Error("502 Cloudflare origin web server overloaded https://secret.example/v1");
+      },
+    };
+    try {
+      const result = await run(
+        ["--requirement", "x", "--evidence", "y", "--workspace", workspace],
+        { provider },
+      );
+
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain(
+        "The analysis service could not complete the request. Try again later or check the service settings.",
+      );
+      expect(result.stderr).not.toMatch(
+        /502|Cloudflare|origin web server|https:\/\/secret\.example/u,
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -256,8 +311,8 @@ describe("runCli --rules / --html", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe("");
-      expect(JSON.parse(result.stdout).version).toBe("rules-v1");
+      expect(result.stderr).toBe("Analyzing requirements...\nReviewing workspace evidence...\n");
+      expectPublicReport(JSON.parse(result.stdout), result.stdout);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -307,9 +362,11 @@ describe("runCli --rules / --html", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toContain("Decomposed requirements");
-      expect(result.stderr).toContain("REQ-1: Implement app module");
-      expect(JSON.parse(result.stdout).version).toBe("rules-v1");
+      expect(result.stderr).toContain("Detected requirements");
+      expect(result.stderr).toContain("  - Implement app module");
+      expect(result.stderr).toContain("  - App module is implemented");
+      expect(result.stderr).not.toMatch(/REQ-\d|CLAIM-\d/);
+      expectPublicReport(JSON.parse(result.stdout), result.stdout);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -334,7 +391,7 @@ describe("runCli --rules / --html", () => {
 
       expect(result.exitCode).toBe(2);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toContain("Requirement decomposition rejected");
+      expect(result.stderr).toContain("Requirement review canceled");
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -358,7 +415,7 @@ describe("runCli --rules / --html", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.stderr).toBe("");
+      expect(result.stderr).toBe("Analyzing requirements...\nReviewing workspace evidence...\n");
       expect(result.stdout.startsWith("<!doctype html>")).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
@@ -445,6 +502,37 @@ async function run(argv: readonly string[], config: RunConfig = {}) {
   });
 
   return { exitCode, stderr, stdout };
+}
+
+function expectPublicReport(
+  parsed: {
+    readonly generatedAt?: unknown;
+    readonly judgements?: unknown;
+    readonly outcomeSummary?: unknown;
+    readonly requirementCoverage?: unknown;
+  },
+  raw: string,
+): void {
+  expect(parsed.generatedAt).toEqual(expect.any(String));
+  expect(parsed.judgements).toEqual(expect.any(Array));
+  expect(parsed.requirementCoverage).toEqual(expect.any(Object));
+  expect(parsed.outcomeSummary).toEqual(expect.any(Array));
+  for (const internalField of [
+    '"version"',
+    '"id"',
+    '"sourceId"',
+    '"reasonCode"',
+    '"semanticDraft"',
+    '"signals"',
+    '"includedJudgementIds"',
+    '"finalStatus"',
+    '"summaryStats"',
+    "insufficient-evidence",
+    "suspicious-fake-implementation",
+    "extra-scope",
+  ]) {
+    expect(raw).not.toContain(internalField);
+  }
 }
 
 function createTempWorkspace(): string {

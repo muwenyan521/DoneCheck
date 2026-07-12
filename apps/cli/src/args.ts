@@ -122,6 +122,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         html = true;
         break;
       }
+      case "--text-only":
       case "--legacy": {
         legacy = true;
         break;
@@ -160,7 +161,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
 
   if (legacy && (rules || html)) {
     return {
-      error: "--legacy cannot be combined with --rules or --html.",
+      error: "--text-only cannot be combined with --rules or --html.",
       ok: false,
     };
   }
@@ -182,7 +183,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
 
   if (json && !legacy) {
     return {
-      error: "--json requires --legacy mode.",
+      error: "--json requires --text-only.",
       ok: false,
     };
   }

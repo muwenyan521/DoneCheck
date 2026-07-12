@@ -13,12 +13,18 @@ describe("ReportPreview", () => {
     expect(html).toContain("Partial: 1");
     expect(html).toContain("Insufficient Evidence: 1");
     expect(html).toContain("Unfulfilled: 1");
-    expect(html).toContain("Suspicious Fake Implementation: 1");
+    expect(html).toContain("Appears Complete Without Working Evidence: 1");
     expect(html).toContain("Extra Scope: 1");
-    expect(html).toContain("67% · Denominator: 6 · Total items: 6 · Weighted fulfilled: 4");
-    expect(html).toContain("50% · Denominator: 6 · Total items: 6 · Weighted fulfilled: 3");
+    expect(html).toContain("67% · 6 items assessed · 6 items total · 1 awaiting evidence");
+    expect(html).toContain("50% · 6 items assessed · 6 items total · 1 awaiting evidence");
+    expect(html).not.toContain("Balanced report layout for general DoneCheck reviews.");
     expect(html).toContain("33% · High");
-    expect(html).toContain("localStorage");
+    expect(html).toContain('class="summary-stats"');
+    expect(html).not.toContain("localStorage");
+    expect(html).not.toContain("Source ID");
+    for (const judgement of rendererFixtureReport.judgements) {
+      expect(html).not.toContain(judgement.sourceId);
+    }
   });
 
   it("switches locale and template without reshaping report data", () => {
@@ -28,7 +34,7 @@ describe("ReportPreview", () => {
 
     expect(html).toContain("前端报告");
     expect(html).toContain("已兑现: 1");
-    expect(html).toContain("范围偏离");
+    expect(html).toContain("需求之外的改动");
     expect(html).toContain("33% · 高");
   });
 });

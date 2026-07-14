@@ -377,6 +377,220 @@ describe("OpenAIProvider", () => {
     expect(JSON.stringify(createArgs)).toContain("exact filePath, lineStart, and lineEnd");
   });
 
+  it("falls back when strict structured output is rejected as an invalid response_format parameter", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let createCalls = 0;
+    const fakeClient = {
+      beta: {
+        chat: {
+          completions: {
+            parse: async () => {
+              throw new Error("400 Invalid parameter: response_format");
+            },
+          },
+        },
+      },
+      chat: {
+        completions: {
+          create: async () => {
+            createCalls += 1;
+            return {
+              choices: [{ message: { content: '{"ok":true}' } }],
+              model: "compatible-model",
+            };
+          },
+        },
+      },
+    };
+    const provider = new OpenAIProvider({ client: fakeClient as never });
+    const z = await import("zod");
+
+    await expect(
+      provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      }),
+    ).resolves.toMatchObject({ object: { ok: true } });
+    expect(createCalls).toBe(1);
+  });
+
+  it("falls back when an upstream masks structured-output rejection as 502", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let createCalls = 0;
+    const provider = new OpenAIProvider({
+      client: {
+        beta: {
+          chat: {
+            completions: {
+              parse: async () => {
+                throw Object.assign(new Error("502 Upstream request failed"), { status: 502 });
+              },
+            },
+          },
+        },
+        chat: {
+          completions: {
+            create: async () => {
+              createCalls += 1;
+              return {
+                choices: [{ message: { content: '{"ok":true}' } }],
+                model: "compatible-model",
+              };
+            },
+          },
+        },
+      } as never,
+    });
+    const z = await import("zod");
+
+    await expect(
+      provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      }),
+    ).resolves.toMatchObject({ object: { ok: true } });
+    expect(createCalls).toBe(1);
+  });
+
+  it("remembers compatibility mode for a schema after structured output fails", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let parseCalls = 0;
+    let createCalls = 0;
+    const provider = new OpenAIProvider({
+      client: {
+        beta: {
+          chat: {
+            completions: {
+              parse: async () => {
+                parseCalls += 1;
+                throw new Error("400 Invalid parameter: response_format");
+              },
+            },
+          },
+        },
+        chat: {
+          completions: {
+            create: async () => {
+              createCalls += 1;
+              return {
+                choices: [{ message: { content: '{"ok":true}' } }],
+                model: "compatible-model",
+              };
+            },
+          },
+        },
+      } as never,
+    });
+    const z = await import("zod");
+    const input = {
+      prompt: { system: "s", user: "u", version: "v1" },
+      schema: z.object({ ok: z.boolean() }),
+      schemaName: "Ok",
+    };
+
+    await provider.generateObject(input);
+    await provider.generateObject(input);
+
+    expect(parseCalls).toBe(1);
+    expect(createCalls).toBe(2);
+  });
+
+  it("shares the first compatibility discovery across concurrent requests for one schema", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let parseCalls = 0;
+    let createCalls = 0;
+    let releaseStrict: (() => void) | undefined;
+    const strictStarted = new Promise<void>((resolve) => {
+      releaseStrict = resolve;
+    });
+    const provider = new OpenAIProvider({
+      client: {
+        beta: {
+          chat: {
+            completions: {
+              parse: async () => {
+                parseCalls += 1;
+                await strictStarted;
+                throw Object.assign(new Error("502 Upstream request failed"), { status: 502 });
+              },
+            },
+          },
+        },
+        chat: {
+          completions: {
+            create: async () => {
+              createCalls += 1;
+              return {
+                choices: [{ message: { content: '{"ok":true}' } }],
+                model: "compatible-model",
+              };
+            },
+          },
+        },
+      } as never,
+    });
+    const z = await import("zod");
+    const input = {
+      prompt: { system: "s", user: "u", version: "v1" },
+      schema: z.object({ ok: z.boolean() }),
+      schemaName: "Ok",
+    };
+
+    const results = Promise.all([
+      provider.generateObject(input),
+      provider.generateObject(input),
+      provider.generateObject(input),
+    ]);
+    releaseStrict?.();
+
+    await expect(results).resolves.toHaveLength(3);
+    expect(parseCalls).toBe(1);
+    expect(createCalls).toBe(3);
+  });
+
+  it("marks a compatibility-mode gateway failure as terminal for outer retries", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let parseCalls = 0;
+    let createCalls = 0;
+    const provider = new OpenAIProvider({
+      client: {
+        beta: {
+          chat: {
+            completions: {
+              parse: async () => {
+                parseCalls += 1;
+                throw Object.assign(new Error("502 Upstream request failed"), { status: 502 });
+              },
+            },
+          },
+        },
+        chat: {
+          completions: {
+            create: async () => {
+              createCalls += 1;
+              throw Object.assign(new Error("502 Upstream request failed"), { status: 502 });
+            },
+          },
+        },
+      } as never,
+    });
+    const z = await import("zod");
+    const request = provider.generateObject({
+      prompt: { system: "s", user: "u", version: "v1" },
+      schema: z.object({ ok: z.boolean() }),
+      schemaName: "Ok",
+    });
+
+    await expect(request).rejects.toMatchObject({
+      name: "StructuredOutputCompatibilityError",
+    });
+    await expect(request).rejects.toThrow("response_format compatibility request failed");
+    expect(parseCalls).toBe(1);
+    expect(createCalls).toBe(1);
+  });
+
   it("repairs fallback JSON when required field is missing", async () => {
     process.env.OPENAI_API_KEY = "sk-test";
     const createArgs: unknown[] = [];
@@ -425,19 +639,22 @@ describe("OpenAIProvider", () => {
     });
     const z = await import("zod");
 
-    await expect(
-      provider.generateObject({
-        prompt: { system: "s", user: "u", version: "v1" },
-        schema: z.object({
-          confidence: z.number(),
-          evidenceRefs: z.array(z.unknown()),
-          explanation: z.string(),
-          judgementDraft: z.string(),
-          repairSuggestion: z.string(),
-        }),
-        schemaName: "SemanticJudgementDraft",
+    const result = provider.generateObject({
+      prompt: { system: "s", user: "u", version: "v1" },
+      schema: z.object({
+        confidence: z.number(),
+        evidenceRefs: z.array(z.unknown()),
+        explanation: z.string(),
+        judgementDraft: z.string(),
+        repairSuggestion: z.string(),
       }),
-    ).rejects.toThrow("repairSuggestion");
+      schemaName: "SemanticJudgementDraft",
+    });
+
+    await expect(result).rejects.toMatchObject({
+      name: "ZodError",
+    });
+    await expect(result).rejects.toThrow("repairSuggestion");
     expect(createArgs).toHaveLength(2);
   });
 
@@ -516,15 +733,10 @@ describe("OpenAIProvider", () => {
     }
   });
 
-  it("does not fallback for 401, 429, 502, or 504", async () => {
+  it("does not fallback for 401, 429, or 504", async () => {
     process.env.OPENAI_API_KEY = "sk-test";
     const z = await import("zod");
-    for (const message of [
-      "401 invalid API key",
-      "429 Too Many Requests",
-      "502 Upstream request failed",
-      "504 Gateway Timeout",
-    ]) {
+    for (const message of ["401 invalid API key", "429 Too Many Requests", "504 Gateway Timeout"]) {
       let createCalls = 0;
       const provider = new OpenAIProvider({
         client: {

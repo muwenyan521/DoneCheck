@@ -20,6 +20,13 @@ export class ProviderConfigError extends Error {
   }
 }
 
+class StructuredOutputCompatibilityError extends Error {
+  constructor(schemaName: string) {
+    super(`OpenAI response_format compatibility request failed for schema ${schemaName}`);
+    this.name = "StructuredOutputCompatibilityError";
+  }
+}
+
 export interface OpenAIProviderOptions {
   readonly apiKey?: string;
   readonly model?: string;
@@ -45,6 +52,9 @@ export interface ProviderWithMetadata extends LLMProvider {
 export class OpenAIProvider implements ProviderWithMetadata {
   private readonly client: OpenAI;
   private readonly baseURL: string | undefined;
+  private readonly compatibilitySchemas = new Set<string>();
+  private readonly schemaDiscoveries = new Map<string, Promise<void>>();
+  private readonly structuredSchemas = new Set<string>();
   private readonly model: string;
   private readonly structuredOutputStrict: boolean;
   readonly metadata: LLMProviderMetadata;
@@ -68,7 +78,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
   async generateObject<T = unknown>(
     input: GenerateObjectInput<T>,
   ): Promise<GenerateObjectResult<T>> {
-    const { responseFormat, guide } = buildStrictCompatResponseFormat(
+    const { guide } = buildStrictCompatResponseFormat(
       input.schema as z.ZodType<T>,
       input.schemaName,
       this.structuredOutputStrict,
@@ -77,45 +87,105 @@ export class OpenAIProvider implements ProviderWithMetadata {
       { role: "system" as const, content: input.prompt.system },
       { role: "user" as const, content: input.prompt.user },
     ];
-    try {
-      const completion = await this.structuredCompletions().parse(
-        { model: this.model, messages, response_format: responseFormat },
-        input.signal === undefined ? undefined : { signal: input.signal },
-      );
-      const choice = completion.choices[0];
-      const parsed = choice?.message?.parsed;
-      if (parsed === undefined || parsed === null) {
-        throw new Error(`OpenAI returned no parsed object for schema ${input.schemaName}`);
+    if (this.compatibilitySchemas.has(input.schemaName)) {
+      return this.generateCompatibleObject(input, messages, guide);
+    }
+    if (this.structuredSchemas.has(input.schemaName)) {
+      return this.generateStructuredObject(input, messages);
+    }
+    const activeDiscovery = this.schemaDiscoveries.get(input.schemaName);
+    if (activeDiscovery !== undefined) {
+      await activeDiscovery;
+      input.signal?.throwIfAborted();
+      if (this.compatibilitySchemas.has(input.schemaName)) {
+        return this.generateCompatibleObject(input, messages, guide);
       }
-      const usage = buildUsage(completion.usage);
-      const metadata: LLMProviderMetadata = {
+      if (this.structuredSchemas.has(input.schemaName)) {
+        return this.generateStructuredObject(input, messages);
+      }
+    }
+    let finishDiscovery: () => void = () => undefined;
+    const discovery = new Promise<void>((resolve) => {
+      finishDiscovery = resolve;
+    });
+    this.schemaDiscoveries.set(input.schemaName, discovery);
+    try {
+      const result = await this.generateStructuredObject(input, messages);
+      this.structuredSchemas.add(input.schemaName);
+      return result;
+    } catch (error) {
+      if (!shouldTryCompatibilityMode(error)) throw error;
+      this.compatibilitySchemas.add(input.schemaName);
+      finishDiscovery();
+      return this.generateCompatibleObject(input, messages, guide);
+    } finally {
+      finishDiscovery();
+      if (this.schemaDiscoveries.get(input.schemaName) === discovery) {
+        this.schemaDiscoveries.delete(input.schemaName);
+      }
+    }
+  }
+
+  private async generateStructuredObject<T>(
+    input: GenerateObjectInput<T>,
+    messages: readonly { readonly role: "system" | "user"; readonly content: string }[],
+  ): Promise<GenerateObjectResult<T>> {
+    const { responseFormat } = buildStrictCompatResponseFormat(
+      input.schema as z.ZodType<T>,
+      input.schemaName,
+      this.structuredOutputStrict,
+    );
+    const completion = await this.structuredCompletions().parse(
+      { model: this.model, messages: [...messages], response_format: responseFormat },
+      input.signal === undefined ? undefined : { signal: input.signal },
+    );
+    const parsed = completion.choices[0]?.message?.parsed;
+    if (parsed === undefined || parsed === null) {
+      throw new Error(`OpenAI returned no parsed object for schema ${input.schemaName}`);
+    }
+    return {
+      metadata: {
         provider: "openai",
         model: completion.model ?? this.model,
         retries: 0,
-      };
-      return { metadata, object: input.schema.parse(parsed), usage };
-    } catch (error) {
-      if (!isUnsupportedResponseFormatError(error) && !isJsonParseError(error)) throw error;
-      const fallback = await this.client.chat.completions.create(
+      },
+      object: input.schema.parse(parsed),
+      usage: buildUsage(completion.usage),
+    };
+  }
+
+  private async generateCompatibleObject<T>(
+    input: GenerateObjectInput<T>,
+    messages: readonly { readonly role: "system" | "user"; readonly content: string }[],
+    guide: NormalizationGuide,
+  ): Promise<GenerateObjectResult<T>> {
+    let fallback: Awaited<ReturnType<OpenAI["chat"]["completions"]["create"]>>;
+    try {
+      fallback = await this.client.chat.completions.create(
         this.buildFallbackRequest(input, messages),
         input.signal === undefined ? undefined : { signal: input.signal },
       );
-      const { parsed } = await this.parseFallbackContent(
-        input,
-        fallback.choices[0]?.message?.content,
-        messages,
-        guide,
-      );
-      return {
-        metadata: {
-          provider: "openai",
-          model: fallback.model ?? this.model,
-          retries: 0,
-        },
-        object: parsed as T,
-        usage: buildUsage(fallback.usage),
-      };
+    } catch (error) {
+      if (isUpstreamGatewayError(error)) {
+        throw new StructuredOutputCompatibilityError(input.schemaName);
+      }
+      throw error;
     }
+    const { parsed } = await this.parseFallbackContent(
+      input,
+      fallback.choices[0]?.message?.content,
+      messages,
+      guide,
+    );
+    return {
+      metadata: {
+        provider: "openai",
+        model: fallback.model ?? this.model,
+        retries: 0,
+      },
+      object: parsed,
+      usage: buildUsage(fallback.usage),
+    };
   }
 
   private structuredCompletions(): OpenAI["chat"]["completions"] {
@@ -160,7 +230,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
       this.buildFallbackRequest(
         input,
         messages,
-        buildRepairInstruction(input.schemaName, content, first.error),
+        buildRepairInstruction(input.schemaName, content, first.error.message),
       ),
       input.signal === undefined ? undefined : { signal: input.signal },
     );
@@ -170,7 +240,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
       guide,
     );
     if (second.ok) return { parsed: second.value };
-    throw new Error(second.error);
+    throw second.error;
   }
 }
 
@@ -179,8 +249,27 @@ function isUnsupportedResponseFormatError(error: unknown): boolean {
   const lower = message.toLocaleLowerCase();
   return (
     lower.includes("response_format") &&
-    (lower.includes("unavailable") || lower.includes("unsupported"))
+    (lower.includes("invalid") ||
+      lower.includes("not supported") ||
+      lower.includes("unavailable") ||
+      lower.includes("unsupported"))
   );
+}
+
+function shouldTryCompatibilityMode(error: unknown): boolean {
+  return (
+    isUnsupportedResponseFormatError(error) ||
+    isJsonParseError(error) ||
+    isUpstreamGatewayError(error)
+  );
+}
+
+function isUpstreamGatewayError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "status" in error && error.status === 502) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b502\b/u.test(message);
 }
 
 function isJsonParseError(error: unknown): boolean {
@@ -233,16 +322,19 @@ function parseAndValidateFallbackContent<T>(
   input: GenerateObjectInput<T>,
   content: unknown,
   guide: NormalizationGuide,
-): { ok: true; value: T } | { ok: false; error: string } {
+): { ok: true; value: T } | { ok: false; error: Error } {
   if (typeof content !== "string" || content.length === 0) {
-    return { ok: false, error: `OpenAI returned no JSON content for schema ${input.schemaName}` };
+    return {
+      ok: false,
+      error: new Error(`OpenAI returned no JSON content for schema ${input.schemaName}`),
+    };
   }
   try {
     const raw = JSON.parse(extractJsonObject(content));
     const normalized = normalizeProviderOutput(raw, guide);
     return { ok: true, value: input.schema.parse(normalized) };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
   }
 }
 

@@ -80,7 +80,7 @@ export function runStartWithElectronAbi(
               DONECHECK_GUI_SMOKE_READY_FILE: readyFile,
             }
           : process.env;
-      const status = runElectron(runner, env);
+      const status = runElectron(runner, env, mode);
       if (status !== 0) {
         console.error("Command failed: pnpm exec electron");
         exitCode = status;
@@ -111,8 +111,10 @@ function runScript(runner, script) {
   return typeof result.status === "number" ? result.status : 1;
 }
 
-function runElectron(runner, env) {
-  const result = runner("pnpm", ["exec", "electron", ...ELECTRON_ARGS], { env });
+function runElectron(runner, env, mode) {
+  const args =
+    mode === "smoke" ? ["--no-sandbox", "--disable-gpu", "dist/electron.cjs"] : ELECTRON_ARGS;
+  const result = runner("pnpm", ["exec", "electron", ...args], { env });
   return typeof result.status === "number" ? result.status : 1;
 }
 

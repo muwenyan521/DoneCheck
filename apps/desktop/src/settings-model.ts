@@ -1,6 +1,6 @@
 import type { Locale, ReportTemplateId } from "./ipc-contract.js";
 
-export type ProviderMode = "mock" | "openai-compatible";
+export type ProviderMode = "bundled-free" | "mock" | "openai-compatible";
 
 export interface DesktopSettings {
   readonly providerMode: ProviderMode;
@@ -26,7 +26,7 @@ export const defaultDesktopSettings: DesktopSettings = {
   ignore: [],
   locale: "zh-CN",
   providerBaseUrl: "",
-  providerMode: "mock",
+  providerMode: "bundled-free",
   providerModel: "",
   recentWorkspaces: [],
   reopenLastWorkspace: false,

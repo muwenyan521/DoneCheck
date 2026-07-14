@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import {
   type AnalyzeRequest,
+  type BundledFreePreflightRequest,
+  type BundledFreePreflightResponse,
+  type BundledFreeStartWorkflowRequest,
+  type BundledFreeStartWorkflowResponse,
+  type BundledFreeStatus,
   type CopyRepairPromptRequest,
   type CredentialSetSessionApiKeyRequest,
   type CredentialStatusResponse,
@@ -35,6 +40,13 @@ const api: DesktopApi = {
   exportHtml: (req: ExportHtmlRequest) => invoke<ExportHtmlResponse>("donecheck:export-html", req),
   copyRepairPrompt: (req: CopyRepairPromptRequest) =>
     invoke<void>("donecheck:clipboard:copy-repair-prompt", req),
+  bundledFree: {
+    status: () => invoke<BundledFreeStatus>("donecheck:bundled-free:status"),
+    preflight: (req: BundledFreePreflightRequest) =>
+      invoke<BundledFreePreflightResponse>("donecheck:bundled-free:preflight", req),
+    startWorkflow: (req: BundledFreeStartWorkflowRequest) =>
+      invoke<BundledFreeStartWorkflowResponse>("donecheck:bundled-free:start-workflow", req),
+  },
   history: {
     list: () => invoke<readonly HistorySummary[]>("donecheck:history:list"),
     get: (req: HistoryGetRequest) => invoke<HistoryEntry | undefined>("donecheck:history:get", req),

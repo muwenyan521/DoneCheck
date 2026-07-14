@@ -15,6 +15,9 @@ export const DESKTOP_API_KEYS = [
   "donecheck:decompose",
   "donecheck:analyze",
   "donecheck:cancel-analysis",
+  "donecheck:bundled-free:status",
+  "donecheck:bundled-free:preflight",
+  "donecheck:bundled-free:start-workflow",
   "donecheck:render-html",
   "donecheck:select-workspace",
   "donecheck:export-html",
@@ -62,6 +65,8 @@ export interface DecomposeRequest {
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
+  readonly options?: { readonly ignore?: readonly string[] };
+  readonly workflowToken?: string;
 }
 
 export interface DecomposeResponse {
@@ -78,6 +83,7 @@ export interface AnalyzeRequest {
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
+  readonly workflowToken?: string;
   readonly requirements?: readonly DecomposeItem[];
   readonly claims?: readonly DecomposeItem[];
   readonly options?: {
@@ -168,6 +174,55 @@ export interface CredentialStatusResponse {
   readonly credentialStatus: CredentialStatus;
 }
 
+export interface BundledFreeStatus {
+  readonly limit: number;
+  readonly localDate: string;
+  readonly remaining: number;
+  readonly resetsAt: string;
+  readonly used: number;
+}
+
+export interface BundledFreePreflightRequest {
+  readonly ignore?: readonly string[];
+  readonly workspaceDir: string;
+}
+
+export interface BundledFreePreflightResponse {
+  readonly eligible: boolean;
+  readonly exceeded: readonly ("file-count" | "largest-file-bytes" | "total-bytes")[];
+  readonly limits: {
+    readonly analyzableFileCount: number;
+    readonly largestAnalyzableFileBytes: number;
+    readonly totalAnalyzableBytes: number;
+  };
+  readonly volume: {
+    readonly analyzableFileCount: number;
+    readonly largestAnalyzableFileBytes: number;
+    readonly totalAnalyzableBytes: number;
+  };
+}
+
+export interface BundledFreeStartWorkflowRequest extends BundledFreePreflightRequest {
+  readonly claim?: string;
+  readonly requestId: string;
+  readonly requirement: string;
+}
+
+export interface BundledFreeStartWorkflowResponse {
+  readonly status: BundledFreeStatus;
+  readonly workflowToken: string;
+}
+
+export interface DesktopBundledFreeApi {
+  status(): Promise<DesktopIpcResult<BundledFreeStatus>>;
+  preflight(
+    request: BundledFreePreflightRequest,
+  ): Promise<DesktopIpcResult<BundledFreePreflightResponse>>;
+  startWorkflow(
+    request: BundledFreeStartWorkflowRequest,
+  ): Promise<DesktopIpcResult<BundledFreeStartWorkflowResponse>>;
+}
+
 export interface DesktopSettingsApi {
   get(): Promise<DesktopIpcResult<DesktopSettings>>;
   set(request: SettingsSetRequest): Promise<DesktopIpcResult<DesktopSettings>>;
@@ -190,6 +245,7 @@ export interface DesktopApi {
   selectWorkspace(): Promise<DesktopIpcResult<SelectWorkspaceResponse>>;
   exportHtml(request: ExportHtmlRequest): Promise<DesktopIpcResult<ExportHtmlResponse>>;
   copyRepairPrompt(request: CopyRepairPromptRequest): Promise<DesktopIpcResult<void>>;
+  readonly bundledFree: DesktopBundledFreeApi;
   readonly history: DesktopHistoryApi;
   readonly settings: DesktopSettingsApi;
   readonly credentials: DesktopCredentialsApi;

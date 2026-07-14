@@ -44,6 +44,9 @@ describe("start-with-electron-abi", () => {
     const result = runStartWithElectronAbi(["smoke"], runner, { readyFile });
     expect(result).toBe(0);
     const electronCall = captured.find((c) => c.key.startsWith("pnpm exec electron"));
+    expect(electronCall.key).toBe(
+      "pnpm exec electron --no-sandbox --disable-gpu dist/electron.cjs",
+    );
     expect(electronCall.env.DONECHECK_GUI_SMOKE_READY_FILE).toBe(readyFile);
     expect(electronCall.env.DONECHECK_GUI_SMOKE).toBe("1");
     expect(captured.at(-1).key).toBe("pnpm rebuild:node");

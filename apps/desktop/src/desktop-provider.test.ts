@@ -15,6 +15,41 @@ afterEach(() => {
 });
 
 describe("desktop provider assembly", () => {
+  it("creates the bundled provider without session or environment credentials", () => {
+    Reflect.deleteProperty(process.env, "OPENAI_API_KEY");
+    Reflect.deleteProperty(process.env, "OPENAI_BASE_URL");
+    Reflect.deleteProperty(process.env, "OPENAI_MODEL");
+    const factory = createDesktopProviderFactory({
+      credentials: createSessionCredentialStore(),
+      getSettings: () => ({ ...defaultDesktopSettings, providerMode: "bundled-free" }),
+    });
+
+    expect(() => factory.createProvider()).not.toThrow();
+    expect(factory.resolveProviderConfig()).toEqual({ providerMode: "bundled-free" });
+  });
+
+  it("does not expose bundled credentials through serialized public factory config", () => {
+    const factory = createDesktopProviderFactory({
+      credentials: createSessionCredentialStore(),
+      getSettings: () => ({ ...defaultDesktopSettings, providerMode: "bundled-free" }),
+    });
+
+    expect(Object.keys(factory.resolveProviderConfig())).toEqual(["providerMode"]);
+  });
+
+  it("ignores OpenAI environment overrides for the bundled provider", () => {
+    process.env.OPENAI_API_KEY = "override-key";
+    process.env.OPENAI_BASE_URL = "https://override.invalid/v1";
+    process.env.OPENAI_MODEL = "override-model";
+    const factory = createDesktopProviderFactory({
+      credentials: createSessionCredentialStore(),
+      getSettings: () => ({ ...defaultDesktopSettings, providerMode: "bundled-free" }),
+    });
+
+    expect(() => factory.createProvider()).not.toThrow();
+    expect(factory.resolveProviderConfig()).toEqual({ providerMode: "bundled-free" });
+  });
+
   it("uses local demo data only when provider mode is explicit mock", () => {
     process.env.OPENAI_API_KEY = "env-key";
     const credentials = createSessionCredentialStore();

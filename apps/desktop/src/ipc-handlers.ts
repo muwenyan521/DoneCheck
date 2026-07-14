@@ -1,7 +1,8 @@
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   WorkspaceValidationError,
+  inspectWorkspaceVolume,
   runDoneCheckPipelineNode,
   validateWorkspace,
 } from "@donecheck/core";
@@ -9,10 +10,22 @@ import type { LLMProvider } from "@donecheck/core";
 import { decomposeRequirements } from "@donecheck/core/semantic";
 import { createHtmlReportDocument } from "@donecheck/report-ui";
 import { defaultTemplate, getTemplateById } from "@donecheck/templates";
+import { evaluateBundledFreeEligibility } from "./bundled-free-limits.js";
+import { BundledFreeQuotaExhaustedError, BundledFreeWorkflowError } from "./bundled-free-quota.js";
+import type {
+  BundledFreeQuotaStore,
+  BundledFreeWorkflowBinding,
+  BundledFreeWorkflowManager,
+} from "./bundled-free-quota.js";
 import type { DesktopProviderFactory, SessionCredentialStore } from "./desktop-provider.js";
 import type { HistoryStore } from "./history-store.js";
 import type {
   AnalyzeRequest,
+  BundledFreePreflightRequest,
+  BundledFreePreflightResponse,
+  BundledFreeStartWorkflowRequest,
+  BundledFreeStartWorkflowResponse,
+  BundledFreeStatus,
   CopyRepairPromptRequest,
   CredentialSetSessionApiKeyRequest,
   CredentialStatusResponse,
@@ -48,6 +61,8 @@ export interface DesktopIpcHandlerDependencies {
   readonly settingsStore?: SettingsStore;
   readonly credentials?: SessionCredentialStore;
   readonly writeClipboardText?: (text: string) => void;
+  readonly bundledFreeQuotaStore?: BundledFreeQuotaStore;
+  readonly bundledFreeWorkflowManager?: BundledFreeWorkflowManager;
 }
 
 const historyNotImplemented = {
@@ -89,8 +104,16 @@ export function createDesktopIpcHandlers(
     cancelAnalysis: (request) =>
       withStructuredErrors(async () => {
         validateRequestId(request.requestId);
+        dependencies.bundledFreeWorkflowManager?.cancelByRequestId(request.requestId);
         activeRequests.get(request.requestId)?.abort(canceledError());
       }),
+    bundledFree: {
+      status: () => withStructuredErrors(async () => bundledFreeStatus(dependencies)),
+      preflight: (request) =>
+        withStructuredErrors(() => bundledFreePreflight(request, dependencies)),
+      startWorkflow: (request) =>
+        withStructuredErrors(() => bundledFreeStartWorkflow(request, dependencies)),
+    },
     renderHtml: (request) => withStructuredErrors(() => renderHtml(request)),
     selectWorkspace: () => withStructuredErrors(() => selectWorkspace(dependencies)),
     exportHtml: (request) => withStructuredErrors(() => exportHtml(request, dependencies)),
@@ -119,6 +142,72 @@ export function createDesktopIpcHandlers(
   };
 }
 
+async function bundledFreePreflight(
+  request: BundledFreePreflightRequest,
+  _dependencies: DesktopIpcHandlerDependencies,
+): Promise<BundledFreePreflightResponse> {
+  const volume = await inspectWorkspaceVolume({
+    workspacePath: request.workspaceDir,
+    ...(request.ignore === undefined ? {} : { ignore: request.ignore }),
+  });
+  return evaluateBundledFreeEligibility(volume);
+}
+
+async function bundledFreeStartWorkflow(
+  request: BundledFreeStartWorkflowRequest,
+  dependencies: DesktopIpcHandlerDependencies,
+): Promise<BundledFreeStartWorkflowResponse> {
+  validateRequestId(request.requestId);
+  if (request.requirement.trim().length === 0) throw invalidInput("requirement is required");
+  const settings = requireSettingsStore(dependencies).get();
+  if (settings.providerMode !== "bundled-free") {
+    throw invalidInput("Free analysis is not the selected provider mode.");
+  }
+  const eligibility = await bundledFreePreflight(request, dependencies);
+  if (!eligibility.eligible) throw invalidInput("The project is too large for free analysis.");
+  const result = requireBundledFreeWorkflowManager(dependencies).reserve({
+    ignore: request.ignore ?? [],
+    providerMode: settings.providerMode,
+    requestId: request.requestId,
+    workspaceDir: resolve(request.workspaceDir),
+  });
+  return { status: result.status, workflowToken: result.token };
+}
+
+function bundledFreeStatus(dependencies: DesktopIpcHandlerDependencies): BundledFreeStatus {
+  const store = dependencies.bundledFreeQuotaStore;
+  if (store === undefined) throw notImplemented("free analysis quota dependency was not provided");
+  return store.status();
+}
+
+function requireBundledFreeWorkflowManager(
+  dependencies: DesktopIpcHandlerDependencies,
+): BundledFreeWorkflowManager {
+  if (dependencies.bundledFreeWorkflowManager === undefined) {
+    throw notImplemented("free analysis workflow dependency was not provided");
+  }
+  return dependencies.bundledFreeWorkflowManager;
+}
+
+function requireWorkflowToken(token: string | undefined): string {
+  if (token === undefined || token.trim().length === 0) {
+    throw invalidInput("A free analysis workflow token is required.");
+  }
+  return token;
+}
+
+function workflowBinding(
+  request: DecomposeRequest | AnalyzeRequest,
+  providerMode: "bundled-free",
+): BundledFreeWorkflowBinding {
+  return {
+    ignore: request.options?.ignore ?? [],
+    providerMode,
+    requestId: request.requestId,
+    workspaceDir: resolve(request.workspaceDir),
+  };
+}
+
 async function copyRepairPrompt(
   request: CopyRepairPromptRequest,
   dependencies: DesktopIpcHandlerDependencies,
@@ -138,7 +227,24 @@ async function analyze(
   signal: AbortSignal,
 ) {
   validateAnalyzeRequest(request);
-  await validateWorkspace(request.workspaceDir, request.options?.ignore);
+  const settings = dependencies.settingsStore?.get();
+  if (settings?.providerMode === "bundled-free") {
+    const binding = workflowBinding(request, settings.providerMode);
+    requireBundledFreeWorkflowManager(dependencies).consumeAnalyze(
+      requireWorkflowToken(request.workflowToken),
+      binding,
+    );
+    const eligibility = evaluateBundledFreeEligibility(
+      await inspectWorkspaceVolume({
+        workspacePath: request.workspaceDir,
+        ignore: binding.ignore,
+        signal,
+      }),
+    );
+    if (!eligibility.eligible) throw invalidInput("The project is too large for free analysis.");
+  } else {
+    await validateWorkspace(request.workspaceDir, request.options?.ignore, signal);
+  }
   const provider =
     dependencies.providerFactory?.() ?? dependencies.desktopProviderFactory?.createProvider();
   if (provider === undefined) throw invalidInput("provider dependency was not provided");
@@ -165,7 +271,15 @@ async function decompose(
   signal: AbortSignal,
 ): Promise<DecomposeResponse> {
   validateDecomposeRequest(request);
-  await validateWorkspace(request.workspaceDir);
+  const settings = dependencies.settingsStore?.get();
+  const ignore = request.options?.ignore ?? [];
+  if (settings?.providerMode === "bundled-free") {
+    requireBundledFreeWorkflowManager(dependencies).consumeDecompose(
+      requireWorkflowToken(request.workflowToken),
+      workflowBinding(request, settings.providerMode),
+    );
+  }
+  await validateWorkspace(request.workspaceDir, ignore, signal);
   const provider =
     dependencies.providerFactory?.() ?? dependencies.desktopProviderFactory?.createProvider();
   if (provider === undefined) throw invalidInput("provider dependency was not provided");
@@ -408,6 +522,12 @@ function toDesktopIpcError(error: unknown, operation: "analysis" | "desktop"): D
     return { code: "canceled", message: error.message };
   }
   if (error instanceof InvalidDesktopInputError) {
+    return { code: "invalid-input", message: error.message };
+  }
+  if (error instanceof BundledFreeQuotaExhaustedError) {
+    return { code: "invalid-input", message: "Today's free analysis limit has been reached." };
+  }
+  if (error instanceof BundledFreeWorkflowError) {
     return { code: "invalid-input", message: error.message };
   }
   if (error instanceof DesktopFeatureNotImplementedError) {

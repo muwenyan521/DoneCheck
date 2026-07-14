@@ -13,6 +13,7 @@ const noRequestChannels = new Set<DesktopApiChannel>([
   "donecheck:settings:reset",
   "donecheck:credentials:clear-session-api-key",
   "donecheck:credentials:status",
+  "donecheck:bundled-free:status",
 ]);
 
 const maxReportBytes = 10 * 1024 * 1024;
@@ -41,10 +42,33 @@ export function assertValidIpcArguments(
   const request = args[0];
   switch (channel) {
     case "donecheck:decompose":
-      validateAnalysisBase(request, ["requestId", "workspaceDir", "requirement", "claim"]);
+      validateAnalysisBase(request, [
+        "requestId",
+        "workspaceDir",
+        "requirement",
+        "claim",
+        "options",
+        "workflowToken",
+      ]);
+      validateWorkflowFields(request);
       return;
     case "donecheck:analyze":
       validateAnalyze(request);
+      return;
+    case "donecheck:bundled-free:preflight":
+      validateBundledFreePreflight(request);
+      return;
+    case "donecheck:bundled-free:start-workflow":
+      validateAnalysisBase(request, [
+        "requestId",
+        "workspaceDir",
+        "requirement",
+        "claim",
+        "ignore",
+      ]);
+      if (isRecord(request) && request.ignore !== undefined) {
+        validateStringArray(request.ignore, "ignore", 500, 4_096);
+      }
       return;
     case "donecheck:cancel-analysis":
     case "donecheck:history:get":
@@ -91,6 +115,7 @@ function validateAnalyze(value: unknown): void {
     "requirements",
     "claims",
     "options",
+    "workflowToken",
   ]);
   if (!isRecord(value)) return;
   if (value.requirements !== undefined) validateItems(value.requirements, "requirements");
@@ -109,6 +134,27 @@ function validateAnalyze(value: unknown): void {
     if (value.options.ignore !== undefined)
       validateStringArray(value.options.ignore, "ignore", 500, 4_096);
   }
+  validateWorkflowFields(value);
+}
+
+function validateWorkflowFields(value: unknown): void {
+  if (!isRecord(value)) return;
+  if (value.workflowToken !== undefined) {
+    validateString(value.workflowToken, "workflowToken", 1, 128);
+  }
+  if (
+    value.options !== undefined &&
+    isRecord(value.options) &&
+    value.options.ignore !== undefined
+  ) {
+    validateStringArray(value.options.ignore, "ignore", 500, 4_096);
+  }
+}
+
+function validateBundledFreePreflight(value: unknown): void {
+  assertRecordWithKeys(value, ["workspaceDir", "ignore"]);
+  validateString(value.workspaceDir, "workspaceDir", 1, 4_096);
+  if (value.ignore !== undefined) validateStringArray(value.ignore, "ignore", 500, 4_096);
 }
 
 function validateAnalysisBase(value: unknown, keys: readonly string[]): void {

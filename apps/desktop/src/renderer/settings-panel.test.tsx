@@ -65,6 +65,27 @@ describe("SettingsPanel", () => {
     expect(html).not.toMatch(/schema|json|strict|structured|validated/iu);
   });
 
+  it("makes built-in free analysis the visible default without custom credential controls", () => {
+    const html = renderToStaticMarkup(
+      <SettingsPanel
+        credentialStatus="none"
+        isOpen={true}
+        locale="zh-CN"
+        onClearSessionApiKey={async () => ({ ok: true })}
+        onClose={() => undefined}
+        onSaveSessionApiKey={async () => ({ ok: true })}
+        onSettingsChange={async () => ({ ok: true })}
+        onSettingsReset={async () => ({ ok: true })}
+        settings={defaultDesktopSettings}
+      />,
+    );
+
+    expect(html).toContain("内置免费分析");
+    expect(html).toContain("每天可完成 3 次内置免费分析");
+    expect(html).not.toContain("在线分析地址");
+    expect(html).not.toContain("访问密钥");
+  });
+
   it("builds an isolated draft and commits it as one patch", () => {
     const draft = createSettingsDraft(settings);
     const edited = { ...draft, providerModel: "gpt-test", topK: 8 };

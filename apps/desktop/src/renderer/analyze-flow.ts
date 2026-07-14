@@ -1,5 +1,7 @@
 import type {
   AnalyzeRequest,
+  BundledFreeStartWorkflowRequest,
+  BundledFreeStartWorkflowResponse,
   DecomposeRequest,
   DecomposeResponse,
   DesktopIpcError,
@@ -9,10 +11,16 @@ import type {
   ReportTemplateId,
 } from "../ipc-contract.js";
 import type { ProviderErrorKind } from "../provider-error-kind.js";
+import type { ProviderMode } from "../settings-model.js";
 
 export interface AnalyzeFlowApi {
   readonly decompose: (request: DecomposeRequest) => Promise<DesktopIpcResult<DecomposeResponse>>;
   readonly analyze: (request: AnalyzeRequest) => Promise<DesktopIpcResult<JudgementReport>>;
+  readonly bundledFree: {
+    readonly startWorkflow: (
+      request: BundledFreeStartWorkflowRequest,
+    ) => Promise<DesktopIpcResult<BundledFreeStartWorkflowResponse>>;
+  };
 }
 
 export interface AnalyzeFlowParams {
@@ -20,6 +28,7 @@ export interface AnalyzeFlowParams {
   readonly requirement: string;
   readonly claim?: string;
   readonly confirmRequirementDecomposition: boolean;
+  readonly providerMode: ProviderMode;
   readonly settings: {
     readonly ignore: readonly string[];
     readonly topK: number;
@@ -31,6 +40,7 @@ export interface AnalyzeRequestSnapshot extends Omit<AnalyzeFlowParams, "api"> {
   readonly locale: Locale;
   readonly templateId: ReportTemplateId;
   readonly startedAt: string;
+  readonly workflowToken?: string;
 }
 
 export interface AnalyzeRequestSnapshotInput extends AnalyzeFlowParams {
@@ -63,6 +73,7 @@ export function createAnalyzeRequestSnapshot(
     ...(claim === undefined || claim.length === 0 ? {} : { claim }),
     confirmRequirementDecomposition: input.confirmRequirementDecomposition,
     locale: input.locale,
+    providerMode: input.providerMode,
     requestId: crypto.randomUUID(),
     requirement: input.requirement.trim(),
     settings: Object.freeze({
@@ -72,6 +83,21 @@ export function createAnalyzeRequestSnapshot(
     startedAt: new Date().toISOString(),
     templateId: input.templateId,
     workspaceDir: input.workspaceDir.trim(),
+  });
+}
+
+export function createRetryAnalyzeRequestSnapshot(
+  snapshot: AnalyzeRequestSnapshot,
+): AnalyzeRequestSnapshot {
+  return createAnalyzeRequestSnapshot({
+    ...(snapshot.claim === undefined ? {} : { claim: snapshot.claim }),
+    confirmRequirementDecomposition: snapshot.confirmRequirementDecomposition,
+    locale: snapshot.locale,
+    providerMode: snapshot.providerMode,
+    requirement: snapshot.requirement,
+    settings: snapshot.settings,
+    templateId: snapshot.templateId,
+    workspaceDir: snapshot.workspaceDir,
   });
 }
 
@@ -86,19 +112,26 @@ export async function startAnalyzeFlow(params: {
   if (snapshot.requirement.length === 0) {
     return { kind: "error", error: localError(snapshot.locale, "requirement") };
   }
+  const started = await startBundledFreeWorkflow(api, snapshot);
+  if (!started.ok) return { kind: "error", error: analyzeFlowError(started.error) };
+  const activeSnapshot = started.data;
   const decomposeResult = await api.decompose({
-    requestId: snapshot.requestId,
-    workspaceDir: snapshot.workspaceDir,
-    requirement: snapshot.requirement,
-    ...(snapshot.claim === undefined ? {} : { claim: snapshot.claim }),
+    requestId: activeSnapshot.requestId,
+    workspaceDir: activeSnapshot.workspaceDir,
+    requirement: activeSnapshot.requirement,
+    ...(activeSnapshot.claim === undefined ? {} : { claim: activeSnapshot.claim }),
+    options: { ignore: activeSnapshot.settings.ignore },
+    ...(activeSnapshot.workflowToken === undefined
+      ? {}
+      : { workflowToken: activeSnapshot.workflowToken }),
   });
   if (!decomposeResult.ok) {
     return { kind: "error", error: analyzeFlowError(decomposeResult.error) };
   }
-  if (snapshot.confirmRequirementDecomposition) {
-    return { kind: "review", decomposition: decomposeResult.data, snapshot };
+  if (activeSnapshot.confirmRequirementDecomposition) {
+    return { kind: "review", decomposition: decomposeResult.data, snapshot: activeSnapshot };
   }
-  return proceedAnalyze({ api, snapshot, decomposition: decomposeResult.data });
+  return proceedAnalyze({ api, snapshot: activeSnapshot, decomposition: decomposeResult.data });
 }
 
 export async function proceedAnalyze(params: {
@@ -122,6 +155,7 @@ export async function proceedAnalyze(params: {
     workspaceDir: snapshot.workspaceDir,
     requirement: snapshot.requirement,
     ...(snapshot.claim === undefined ? {} : { claim: snapshot.claim }),
+    ...(snapshot.workflowToken === undefined ? {} : { workflowToken: snapshot.workflowToken }),
     requirements,
     claims: decomposition.claims.filter((item) => item.text.trim().length > 0),
     options: { ignore: snapshot.settings.ignore, topK: snapshot.settings.topK },
@@ -130,6 +164,28 @@ export async function proceedAnalyze(params: {
     return { kind: "error", error: analyzeFlowError(analyzeResult.error) };
   }
   return { kind: "analyzed", report: analyzeResult.data };
+}
+
+async function startBundledFreeWorkflow(
+  api: AnalyzeFlowApi,
+  snapshot: AnalyzeRequestSnapshot,
+): Promise<
+  | { readonly ok: true; readonly data: AnalyzeRequestSnapshot }
+  | { readonly ok: false; readonly error: DesktopIpcError }
+> {
+  if (snapshot.providerMode !== "bundled-free") return { ok: true, data: snapshot };
+  const result = await api.bundledFree.startWorkflow({
+    requestId: snapshot.requestId,
+    workspaceDir: snapshot.workspaceDir,
+    requirement: snapshot.requirement,
+    ...(snapshot.claim === undefined ? {} : { claim: snapshot.claim }),
+    ignore: snapshot.settings.ignore,
+  });
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    data: Object.freeze({ ...snapshot, workflowToken: result.data.workflowToken }),
+  };
 }
 
 function analyzeFlowError(error: DesktopIpcError): AnalyzeFlowError {

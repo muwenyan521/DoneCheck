@@ -101,6 +101,7 @@
             gcc
             pkg-config
             gnumake
+            xvfb
           ];
 
           shellHook = ''

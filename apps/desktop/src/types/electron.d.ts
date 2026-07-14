@@ -42,9 +42,20 @@ declare module "electron" {
       height?: number;
       webPreferences?: WebPreferences;
     });
+    readonly webContents: WebContents;
     loadFile(path: string): Promise<void>;
     on(event: "closed", listener: () => void): BrowserWindow;
     static getAllWindows(): BrowserWindow[];
+  }
+
+  export interface NativeImage {
+    toPNG(): Buffer;
+  }
+
+  export interface WebContents {
+    capturePage(): Promise<NativeImage>;
+    on(event: string, listener: (...args: unknown[]) => void): WebContents;
+    setWindowOpenHandler(handler: () => { readonly action: "deny" }): void;
   }
 
   export interface IpcMain {

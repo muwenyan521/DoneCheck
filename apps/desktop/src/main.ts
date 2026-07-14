@@ -12,8 +12,8 @@ export function createMainWindow(): BrowserWindow {
   const rendererEntryPath = getRendererEntryPath();
   const rendererEntryUrl = pathToFileURL(rendererEntryPath).href;
   const win = new BrowserWindow({
-    width: 1024,
-    height: 768,
+    width: smokeDimension("DONECHECK_GUI_SMOKE_WIDTH", 1024),
+    height: smokeDimension("DONECHECK_GUI_SMOKE_HEIGHT", 768),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -95,14 +95,26 @@ function startGuiSmoke(): void {
     }
     const win = createMainWindow();
     win.webContents.on("did-finish-load", () => {
-      clearTimeout(timeout);
-      const storagePath = storageFile ?? ":memory:";
-      const result = smokeSettingsRoundtrip(storagePath);
-      finish({
-        rendererLoaded: true,
-        storageOk: result.ok,
-        error: result.ok ? null : `storage roundtrip failed: ${result.error}`,
-      });
+      void captureSmokeWindow(win).then(
+        () => {
+          clearTimeout(timeout);
+          const storagePath = storageFile ?? ":memory:";
+          const result = smokeSettingsRoundtrip(storagePath);
+          finish({
+            rendererLoaded: true,
+            storageOk: result.ok,
+            error: result.ok ? null : `storage roundtrip failed: ${result.error}`,
+          });
+        },
+        (error: unknown) => {
+          clearTimeout(timeout);
+          finish({
+            rendererLoaded: false,
+            storageOk: false,
+            error: `screenshot failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        },
+      );
     });
     win.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
       clearTimeout(timeout);
@@ -133,6 +145,18 @@ function startGuiSmoke(): void {
     }
     app.quit();
   });
+}
+
+async function captureSmokeWindow(win: BrowserWindow): Promise<void> {
+  const screenshotPath = process.env.DONECHECK_GUI_SMOKE_SCREENSHOT;
+  if (screenshotPath === undefined) return;
+  const image = await win.webContents.capturePage();
+  writeFileSync(screenshotPath, image.toPNG());
+}
+
+function smokeDimension(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value >= 320 && value <= 4096 ? value : fallback;
 }
 
 function getRendererEntryPath(): string {

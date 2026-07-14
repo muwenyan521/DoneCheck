@@ -96,7 +96,9 @@ function normalizeSettings(value: Record<string, unknown>): DesktopSettings {
         : defaultDesktopSettings.locale,
     providerBaseUrl: normalizeStoredProviderBaseUrl(value.providerBaseUrl),
     providerMode:
-      value.providerMode === "mock" || value.providerMode === "openai-compatible"
+      value.providerMode === "bundled-free" ||
+      value.providerMode === "mock" ||
+      value.providerMode === "openai-compatible"
         ? value.providerMode
         : defaultDesktopSettings.providerMode,
     providerModel: readString(value.providerModel, defaultDesktopSettings.providerModel),

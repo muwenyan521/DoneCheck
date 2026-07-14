@@ -30,6 +30,34 @@ describe("desktop IPC boundary", () => {
     ).toThrow(/length/iu);
   });
 
+  it("validates bundled free preflight, workflow start, and opaque analysis tokens", () => {
+    expect(() =>
+      assertValidIpcArguments("donecheck:bundled-free:preflight", [
+        { ignore: ["dist"], workspaceDir: "/tmp/project" },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:bundled-free:start-workflow", [
+        { requestId: "workflow", requirement: "works", workspaceDir: "/tmp/project" },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:decompose", [
+        {
+          requestId: "workflow",
+          requirement: "works",
+          workspaceDir: "/tmp/project",
+          workflowToken: "opaque-token",
+        },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:bundled-free:preflight", [
+        { workspaceDir: "/tmp/project", unknown: true },
+      ]),
+    ).toThrow(/unsupported/iu);
+  });
+
   it("limits clipboard content and report size", () => {
     expect(() =>
       assertValidIpcArguments("donecheck:clipboard:copy-repair-prompt", [

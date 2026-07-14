@@ -1,6 +1,8 @@
 import { reportTemplates } from "@donecheck/templates";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BundledFreePreflightResponse,
+  BundledFreeStatus,
   CredentialStatus,
   DecomposeResponse,
   HistorySummary,
@@ -19,6 +21,7 @@ import {
   type AnalyzeFlowError,
   type AnalyzeRequestSnapshot,
   createAnalyzeRequestSnapshot,
+  createRetryAnalyzeRequestSnapshot,
   proceedAnalyze,
   startAnalyzeFlow,
 } from "./analyze-flow.js";
@@ -61,6 +64,8 @@ export function App() {
   const [claim, setClaim] = useState("");
   const [settings, setSettings] = useState(defaultDesktopSettings);
   const [credentialStatus, setCredentialStatus] = useState<CredentialStatus>("none");
+  const [bundledFreeStatus, setBundledFreeStatus] = useState<BundledFreeStatus>();
+  const [bundledFreePreflight, setBundledFreePreflight] = useState<BundledFreePreflightResponse>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisState>({ kind: "ready" });
   const [history, setHistory] = useState<readonly HistorySummary[]>([]);
@@ -78,12 +83,24 @@ export function App() {
   useEffect(() => {
     void loadSettings();
     void loadCredentialStatus();
+    void loadBundledFreeStatus();
     void loadHistory();
   }, []);
 
   useEffect(() => {
     document.documentElement.lang = settings.locale;
   }, [settings.locale]);
+
+  useEffect(() => {
+    if (settings.providerMode !== "bundled-free" || workspaceDir.trim().length === 0) {
+      setBundledFreePreflight(undefined);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void loadBundledFreePreflight(workspaceDir, settings.ignore);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [settings.ignore, settings.providerMode, workspaceDir]);
 
   useEffect(() => {
     if (!busy) return;
@@ -96,6 +113,9 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [busy]);
 
+  const bundledFreeBlocked =
+    settings.providerMode === "bundled-free" &&
+    (bundledFreeStatus?.remaining === 0 || bundledFreePreflight?.eligible === false);
   const canAnalyze = useMemo(
     () => workspaceDir.trim().length > 0 && requirement.trim().length > 0 && !busy,
     [busy, requirement, workspaceDir],
@@ -118,25 +138,13 @@ export function App() {
       claim,
       confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
       locale: settings.locale,
+      providerMode: settings.providerMode,
       requirement,
       settings: { ignore: settings.ignore, topK: settings.topK },
       templateId: settings.templateId,
       workspaceDir,
     });
-    activeRequestId.current = snapshot.requestId;
-    setSelectedHistoryId(undefined);
-    setNotice("");
-    setAnalysis({ kind: "decomposing", snapshot });
-    const result = await startAnalyzeFlow({ api, snapshot });
-    if (activeRequestId.current !== snapshot.requestId) return;
-    if (result.kind === "review") {
-      setAnalysis({ kind: "review", decomposition: result.decomposition, snapshot });
-    } else if (result.kind === "error") {
-      activeRequestId.current = undefined;
-      showAnalyzeFlowError(result.error, snapshot);
-    } else {
-      await finalizeReport(snapshot, result.report);
-    }
+    await runAnalyzeSnapshot(api, snapshot);
   }
 
   async function confirmDecomposition(decomposition: DecomposeResponse) {
@@ -163,12 +171,26 @@ export function App() {
   async function analyzeSnapshot(snapshot: AnalyzeRequestSnapshot) {
     const api = desktopWindow.donecheck;
     if (!api) return showLocalError(getDesktopOperationFeedback(settings.locale, "app-connection"));
+    await runAnalyzeSnapshot(api, createRetryAnalyzeRequestSnapshot(snapshot));
+  }
+
+  async function runAnalyzeSnapshot(
+    api: NonNullable<DoneCheckDesktopWindow["donecheck"]>,
+    snapshot: AnalyzeRequestSnapshot,
+  ) {
     activeRequestId.current = snapshot.requestId;
+    setSelectedHistoryId(undefined);
+    setNotice("");
     setAnalysis({ kind: "decomposing", snapshot });
     const result = await startAnalyzeFlow({ api, snapshot });
+    void loadBundledFreeStatus();
     if (activeRequestId.current !== snapshot.requestId) return;
     if (result.kind === "review")
-      setAnalysis({ kind: "review", decomposition: result.decomposition, snapshot });
+      setAnalysis({
+        kind: "review",
+        decomposition: result.decomposition,
+        snapshot: result.snapshot,
+      });
     else if (result.kind === "error") showAnalyzeFlowError(result.error, snapshot);
     else await finalizeReport(snapshot, result.report);
   }
@@ -181,6 +203,7 @@ export function App() {
     setAnalysis({ kind: "canceled" });
     setNotice(zh ? "分析已取消，未生成报告。" : "Analysis canceled. No report was created.");
     if (requestId) void desktopWindow.donecheck?.cancelAnalysis({ requestId });
+    void loadBundledFreeStatus();
   }
 
   async function finalizeReport(snapshot: AnalyzeRequestSnapshot, report: JudgementReport) {
@@ -243,6 +266,7 @@ export function App() {
     const snapshot = createAnalyzeRequestSnapshot({
       confirmRequirementDecomposition: settings.confirmRequirementDecomposition,
       locale: settings.locale,
+      providerMode: settings.providerMode,
       requirement: result.data.requirementSummary,
       settings: { ignore: settings.ignore, topK: settings.topK },
       templateId: settings.templateId,
@@ -323,6 +347,19 @@ export function App() {
   async function loadCredentialStatus() {
     const result = await desktopWindow.donecheck?.credentials.status();
     if (result?.ok) setCredentialStatus(result.data.credentialStatus);
+  }
+
+  async function loadBundledFreeStatus() {
+    const result = await desktopWindow.donecheck?.bundledFree.status();
+    if (result?.ok) setBundledFreeStatus(result.data);
+  }
+
+  async function loadBundledFreePreflight(workspace: string, ignore: readonly string[]) {
+    const result = await desktopWindow.donecheck?.bundledFree.preflight({
+      workspaceDir: workspace,
+      ...(ignore.length === 0 ? {} : { ignore }),
+    });
+    if (result?.ok) setBundledFreePreflight(result.data);
   }
 
   async function exportHtml() {
@@ -557,7 +594,12 @@ export function App() {
             </label>
           </div>
           <div className="rail-actions">
-            <button className="primary" disabled={!canAnalyze} onClick={analyze} type="button">
+            <button
+              className="primary"
+              disabled={!canAnalyze || bundledFreeBlocked}
+              onClick={analyze}
+              type="button"
+            >
               {zh ? "开始分析" : "Start analysis"}
             </button>
             {busy && (
@@ -566,6 +608,35 @@ export function App() {
               </button>
             )}
           </div>
+          {settings.providerMode === "bundled-free" && (
+            <section aria-live="polite" className="free-tier-status">
+              <strong>{zh ? "内置免费分析" : "Built-in free analysis"}</strong>
+              <span>
+                {zh
+                  ? `今日剩余 ${bundledFreeStatus?.remaining ?? 3} / ${bundledFreeStatus?.limit ?? 3} 次`
+                  : `${bundledFreeStatus?.remaining ?? 3} / ${bundledFreeStatus?.limit ?? 3} tests remaining today`}
+              </span>
+              <span>
+                {zh
+                  ? "支持不超过 250 个可分析文件、总计 2 MiB，单文件 256 KiB。"
+                  : "Up to 250 analyzable files, 2 MiB total, and 256 KiB per file."}
+              </span>
+              {bundledFreePreflight?.eligible === false && (
+                <span className="free-tier-blocked">
+                  {zh
+                    ? "当前项目超过内置免费分析范围，请切换到自定义在线分析。"
+                    : "This project exceeds the free analysis limit. Switch to a custom online provider."}
+                </span>
+              )}
+              {bundledFreeStatus?.remaining === 0 && (
+                <span className="free-tier-blocked">
+                  {zh
+                    ? `今日次数已用完，将于 ${new Date(bundledFreeStatus.resetsAt).toLocaleTimeString(settings.locale, { timeStyle: "short" })} 重置。`
+                    : `Today's limit is used. It resets at ${new Date(bundledFreeStatus.resetsAt).toLocaleTimeString(settings.locale, { timeStyle: "short" })}.`}
+                </span>
+              )}
+            </section>
+          )}
           <p
             aria-live="polite"
             className={`status ${analysis.kind === "error" ? "error" : completed ? "ready" : busy ? "running" : "idle"}`}

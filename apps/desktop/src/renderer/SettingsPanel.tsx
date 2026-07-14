@@ -134,37 +134,50 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 updateDraft({ providerMode: event.currentTarget.value as ProviderMode })
               }
             >
+              <option value="bundled-free">{zh ? "内置免费分析" : "Built-in free analysis"}</option>
               <option value="mock">{zh ? "离线检查" : "Offline analysis"}</option>
               <option value="openai-compatible">{zh ? "在线分析" : "Online analysis"}</option>
             </select>
           </label>
           <p className="settings-help">
-            {zh
-              ? "离线检查可直接使用。在线分析下次检查时生效。"
-              : "Offline analysis is ready to use. Online analysis will use these settings for the next check."}
+            {draft.providerMode === "bundled-free"
+              ? zh
+                ? "每天可完成 3 次内置免费分析，仅支持不超过 250 个可分析文件、总计 2 MiB 的项目。"
+                : "Three complete built-in free analyses are available daily for projects up to 250 analyzable files and 2 MiB total."
+              : draft.providerMode === "mock"
+                ? zh
+                  ? "离线检查可直接使用。"
+                  : "Offline analysis is ready to use."
+                : zh
+                  ? "在线分析将使用下方地址、模型和仅保留在内存中的访问密钥。"
+                  : "Online analysis will use the address, model, and memory-only access key below."}
           </p>
-          <label>
-            {zh ? "在线分析地址" : "Online analysis address"}
-            <input
-              value={draft.providerBaseUrl}
-              onChange={(event) => updateDraft({ providerBaseUrl: event.currentTarget.value })}
-              placeholder={zh ? "留空时使用默认设置" : "Leave blank to use the default setting"}
-            />
-          </label>
-          <label>
-            {zh ? "分析模型" : "Analysis model"}
-            <input
-              value={draft.providerModel}
-              onChange={(event) => updateDraft({ providerModel: event.currentTarget.value })}
-              placeholder={zh ? "留空时使用默认设置" : "Leave blank to use the default setting"}
-            />
-          </label>
-          <SessionKeyInput
-            credentialStatus={props.credentialStatus}
-            locale={props.locale}
-            onClear={props.onClearSessionApiKey}
-            onSave={props.onSaveSessionApiKey}
-          />
+          {draft.providerMode === "openai-compatible" && (
+            <>
+              <label>
+                {zh ? "在线分析地址" : "Online analysis address"}
+                <input
+                  value={draft.providerBaseUrl}
+                  onChange={(event) => updateDraft({ providerBaseUrl: event.currentTarget.value })}
+                  placeholder={zh ? "留空时使用默认设置" : "Leave blank to use the default setting"}
+                />
+              </label>
+              <label>
+                {zh ? "分析模型" : "Analysis model"}
+                <input
+                  value={draft.providerModel}
+                  onChange={(event) => updateDraft({ providerModel: event.currentTarget.value })}
+                  placeholder={zh ? "留空时使用默认设置" : "Leave blank to use the default setting"}
+                />
+              </label>
+              <SessionKeyInput
+                credentialStatus={props.credentialStatus}
+                locale={props.locale}
+                onClear={props.onClearSessionApiKey}
+                onSave={props.onSaveSessionApiKey}
+              />
+            </>
+          )}
         </fieldset>
 
         <details>

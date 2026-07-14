@@ -295,6 +295,26 @@ label {
   flex: 1 1 180px;
 }
 
+.free-tier-status {
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+  display: grid;
+  font-size: 0.75rem;
+  gap: 4px;
+  line-height: 1.45;
+  padding: 2px 0 2px 12px;
+}
+
+.free-tier-status strong {
+  color: var(--ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.free-tier-blocked {
+  color: var(--danger-ink);
+}
+
 .status {
   align-items: start;
   border-left: 2px solid var(--line-strong);

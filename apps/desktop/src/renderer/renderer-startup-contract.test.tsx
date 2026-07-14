@@ -49,6 +49,12 @@ describe("preload/renderer contract", () => {
     expect(DESKTOP_API_KEYS).toContain("donecheck:cancel-analysis");
   });
 
+  it("exposes bundled free status and workflow channels without credentials", () => {
+    expect(DESKTOP_API_KEYS).toContain("donecheck:bundled-free:status");
+    expect(DESKTOP_API_KEYS).toContain("donecheck:bundled-free:preflight");
+    expect(DESKTOP_API_KEYS).toContain("donecheck:bundled-free:start-workflow");
+  });
+
   it("exposes history restore so deleted records can be undone", () => {
     expect(DESKTOP_API_KEYS).toContain("donecheck:history:restore");
   });

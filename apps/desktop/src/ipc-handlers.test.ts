@@ -4,6 +4,10 @@ import { join } from "node:path";
 import type { GenerateObjectInput, GenerateObjectResult, LLMProvider } from "@donecheck/core";
 import type { JudgementReport } from "@donecheck/shared";
 import { describe, expect, it } from "vitest";
+import {
+  createBundledFreeQuotaStore,
+  createBundledFreeWorkflowManager,
+} from "./bundled-free-quota.js";
 import { createSessionCredentialStore } from "./desktop-provider.js";
 import { createHistoryStore } from "./history-store.js";
 import { createDesktopIpcHandlers } from "./ipc-handlers.js";
@@ -452,7 +456,7 @@ describe("desktop IPC handlers", () => {
 
     await expect(handlers.settings.get()).resolves.toEqual({
       ok: true,
-      data: expect.objectContaining({ providerMode: "mock", topK: 5 }),
+      data: expect.objectContaining({ providerMode: "bundled-free", topK: 5 }),
     });
     await expect(
       handlers.settings.set({
@@ -560,6 +564,108 @@ describe("desktop IPC handlers", () => {
       expect(result.data.assumptions).toEqual(["login flow assumes session cookie available"]);
       expect(result.data.clarifyingQuestions).toEqual(["Should logout also clear cookies?"]);
       expect(result.data.warnings).toEqual(["REQ-3 has no matching claim"]);
+    });
+
+    it("reserves one bundled workflow across decompose and analyze, then rejects replay", async () => {
+      const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+      const quotaStore = createBundledFreeQuotaStore({});
+      const workflowManager = createBundledFreeWorkflowManager(quotaStore);
+      const handlers = createDesktopIpcHandlers({
+        bundledFreeQuotaStore: quotaStore,
+        bundledFreeWorkflowManager: workflowManager,
+        providerFactory: () => multiEntryProvider,
+        settingsStore,
+      });
+      const workspaceDir = await createWorkspace();
+      const started = await handlers.bundledFree.startWorkflow({
+        requestId: "bundled-workflow",
+        requirement: "User can log in and persist a session.",
+        workspaceDir,
+      });
+      expect(started).toMatchObject({ ok: true, data: { status: { remaining: 2 } } });
+      if (!started.ok) throw new Error(started.error.message);
+
+      const decomposed = await handlers.decompose({
+        requestId: "bundled-workflow",
+        requirement: "User can log in and persist a session.",
+        workspaceDir,
+        workflowToken: started.data.workflowToken,
+      });
+      expect(decomposed.ok).toBe(true);
+      if (!decomposed.ok) throw new Error(decomposed.error.message);
+
+      const analyzed = await handlers.analyze({
+        claims: decomposed.data.claims,
+        requestId: "bundled-workflow",
+        requirement: "User can log in and persist a session.",
+        requirements: decomposed.data.requirements,
+        workspaceDir,
+        workflowToken: started.data.workflowToken,
+      });
+      expect(analyzed.ok).toBe(true);
+      await expect(
+        handlers.analyze({
+          requestId: "bundled-workflow",
+          requirement: "User can log in and persist a session.",
+          workspaceDir,
+          workflowToken: started.data.workflowToken,
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      expect(quotaStore.status()).toMatchObject({ remaining: 2, used: 1 });
+      quotaStore.close();
+      settingsStore.close();
+    });
+
+    it("blocks oversized bundled projects before quota reservation or provider construction", async () => {
+      const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+      const quotaStore = createBundledFreeQuotaStore({});
+      const workspaceDir = await createWorkspace();
+      await writeFile(join(workspaceDir, "large.ts"), "x".repeat(256 * 1024 + 1));
+      let providerConstructions = 0;
+      const handlers = createDesktopIpcHandlers({
+        bundledFreeQuotaStore: quotaStore,
+        bundledFreeWorkflowManager: createBundledFreeWorkflowManager(quotaStore),
+        providerFactory: () => {
+          providerConstructions += 1;
+          return multiEntryProvider;
+        },
+        settingsStore,
+      });
+
+      await expect(
+        handlers.bundledFree.startWorkflow({
+          requestId: "oversized-workflow",
+          requirement: "User can log in.",
+          workspaceDir,
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "invalid-input" } });
+      expect(quotaStore.status()).toMatchObject({ remaining: 3, used: 0 });
+      expect(providerConstructions).toBe(0);
+      quotaStore.close();
+      settingsStore.close();
+    });
+
+    it("does not apply bundled quota or token requirements to mock mode", async () => {
+      const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+      settingsStore.set({ providerMode: "mock" });
+      const quotaStore = createBundledFreeQuotaStore({});
+      const handlers = createDesktopIpcHandlers({
+        bundledFreeQuotaStore: quotaStore,
+        bundledFreeWorkflowManager: createBundledFreeWorkflowManager(quotaStore),
+        providerFactory: () => multiEntryProvider,
+        settingsStore,
+      });
+
+      await expect(
+        handlers.decompose({
+          requestId: "mock-without-token",
+          requirement: "User can log in.",
+          workspaceDir: await createWorkspace(),
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(quotaStore.status()).toMatchObject({ remaining: 3, used: 0 });
+      quotaStore.close();
+      settingsStore.close();
     });
 
     it("analyze passes requirements and claims arrays to the pipeline producing multi-entry coverage", async () => {

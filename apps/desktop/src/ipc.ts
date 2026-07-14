@@ -1,10 +1,16 @@
 import { join } from "node:path";
 import { app, clipboard, dialog, ipcMain } from "electron";
+import {
+  createBundledFreeQuotaStore,
+  createBundledFreeWorkflowManager,
+} from "./bundled-free-quota.js";
 import { createDesktopProviderFactory, createSessionCredentialStore } from "./desktop-provider.js";
 import { createHistoryStore } from "./history-store.js";
 import { assertAllowedIpcSender, assertValidIpcArguments } from "./ipc-boundary.js";
 import type {
   AnalyzeRequest,
+  BundledFreePreflightRequest,
+  BundledFreeStartWorkflowRequest,
   CopyRepairPromptRequest,
   CredentialSetSessionApiKeyRequest,
   DecomposeRequest,
@@ -28,11 +34,17 @@ export function registerIpcHandlers(rendererEntryUrl: string): void {
     databasePath: join(app.getPath("userData"), "settings.sqlite"),
   });
   const credentials = createSessionCredentialStore();
+  const bundledFreeQuotaStore = createBundledFreeQuotaStore({
+    databasePath: join(app.getPath("userData"), "bundled-free-quota.sqlite"),
+  });
+  const bundledFreeWorkflowManager = createBundledFreeWorkflowManager(bundledFreeQuotaStore);
   const desktopProviderFactory = createDesktopProviderFactory({
     credentials,
     getSettings: () => settingsStore.get(),
   });
   const handlers = createDesktopIpcHandlers({
+    bundledFreeQuotaStore,
+    bundledFreeWorkflowManager,
     credentials,
     desktopProviderFactory,
     historyStore,
@@ -56,6 +68,13 @@ export function registerIpcHandlers(rendererEntryUrl: string): void {
   register("donecheck:analyze", rendererEntryUrl, (req) => handlers.analyze(req as AnalyzeRequest));
   register("donecheck:cancel-analysis", rendererEntryUrl, (req) =>
     handlers.cancelAnalysis(req as { readonly requestId: string }),
+  );
+  register("donecheck:bundled-free:status", rendererEntryUrl, () => handlers.bundledFree.status());
+  register("donecheck:bundled-free:preflight", rendererEntryUrl, (req) =>
+    handlers.bundledFree.preflight(req as BundledFreePreflightRequest),
+  );
+  register("donecheck:bundled-free:start-workflow", rendererEntryUrl, (req) =>
+    handlers.bundledFree.startWorkflow(req as BundledFreeStartWorkflowRequest),
   );
   register("donecheck:render-html", rendererEntryUrl, (req) =>
     handlers.renderHtml(req as RenderHtmlRequest),

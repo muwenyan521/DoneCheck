@@ -20,9 +20,11 @@ const report = { judgements: [] } as unknown as JudgementReport;
 function createSpy() {
   const decomposeCalls: DecomposeRequest[] = [];
   const analyzeCalls: AnalyzeRequest[] = [];
+  const startWorkflowCalls: unknown[] = [];
   return {
     decomposeCalls,
     analyzeCalls,
+    startWorkflowCalls,
     decompose: async (request: DecomposeRequest): Promise<DesktopIpcResult<DecomposeResponse>> => {
       decomposeCalls.push(request);
       return { ok: true, data: decomposition };
@@ -30,6 +32,24 @@ function createSpy() {
     analyze: async (request: AnalyzeRequest): Promise<DesktopIpcResult<JudgementReport>> => {
       analyzeCalls.push(request);
       return { ok: true, data: report };
+    },
+    bundledFree: {
+      startWorkflow: async (request: unknown) => {
+        startWorkflowCalls.push(request);
+        return {
+          ok: true as const,
+          data: {
+            status: {
+              limit: 3,
+              localDate: "2026-07-14",
+              remaining: 2,
+              resetsAt: "2026-07-14T16:00:00.000Z",
+              used: 1,
+            },
+            workflowToken: "workflow-token",
+          },
+        };
+      },
     },
   };
 }
@@ -39,6 +59,7 @@ function snapshot(overrides: Partial<Parameters<typeof createAnalyzeRequestSnaps
     claim: "  implemented login  ",
     confirmRequirementDecomposition: true,
     locale: "zh-CN",
+    providerMode: "mock",
     requirement: "  Users can log in.  ",
     settings: { ignore: ["dist"], topK: 5 },
     templateId: "generic",
@@ -124,5 +145,18 @@ describe("analysis request snapshots", () => {
     });
     expect(result).toEqual({ kind: "analyzed", report });
     expect(api.analyzeCalls).toHaveLength(1);
+  });
+
+  it("reserves one bundled workflow and carries its opaque token through both stages", async () => {
+    const api = createSpy();
+    const result = await startAnalyzeFlow({
+      api,
+      snapshot: snapshot({ confirmRequirementDecomposition: false, providerMode: "bundled-free" }),
+    });
+
+    expect(result).toEqual({ kind: "analyzed", report });
+    expect(api.startWorkflowCalls).toHaveLength(1);
+    expect(api.decomposeCalls[0]).toMatchObject({ workflowToken: "workflow-token" });
+    expect(api.analyzeCalls[0]).toMatchObject({ workflowToken: "workflow-token" });
   });
 });

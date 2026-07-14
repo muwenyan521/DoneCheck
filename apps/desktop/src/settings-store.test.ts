@@ -89,6 +89,32 @@ describe("settings store", () => {
     store.close();
   });
 
+  it("defaults and resets to bundled free analysis while preserving explicit legacy modes", () => {
+    const db = new Database(":memory:");
+    const store = createSettingsStore({ database: db });
+
+    expect(store.get().providerMode).toBe("bundled-free");
+    expect(store.set({ providerMode: "mock" }).providerMode).toBe("mock");
+    expect(store.set({ providerMode: "openai-compatible" }).providerMode).toBe("openai-compatible");
+    expect(store.reset().providerMode).toBe("bundled-free");
+
+    store.close();
+  });
+
+  it("normalizes an unknown persisted provider mode to bundled free analysis", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)");
+    db.prepare("INSERT INTO app_settings (key, value_json) VALUES (?, ?)").run(
+      "providerMode",
+      JSON.stringify("removed-mode"),
+    );
+    const store = createSettingsStore({ database: db });
+
+    expect(store.get().providerMode).toBe("bundled-free");
+
+    store.close();
+  });
+
   it.each([
     ["", ""],
     [" https://compatible.example/v1/ ", "https://compatible.example/v1"],

@@ -59,10 +59,12 @@ export async function selectCandidateFiles(
     new Set(truncatedLlmSelected),
   );
 
-  const candidateFiles = [...truncatedLlmSelected, ...staticallyRecalled];
-  if (candidateFiles.length > topK) {
-    warnings.push(`Candidate list exceeded topK=${topK} due to static recall fallback.`);
+  const remainingSlots = Math.max(0, topK - truncatedLlmSelected.length);
+  const selectedStaticFiles = staticallyRecalled.slice(0, remainingSlots);
+  if (staticallyRecalled.length > selectedStaticFiles.length) {
+    warnings.push(`Static recall truncated to preserve topK=${topK}.`);
   }
+  const candidateFiles = [...truncatedLlmSelected, ...selectedStaticFiles];
 
   return fileSelectionResultSchema.parse({
     candidateFiles,
@@ -70,7 +72,7 @@ export async function selectCandidateFiles(
     llmSelected: truncatedLlmSelected,
     providerMetadata: response.metadata,
     reasoningSummary: modelOutput.reasoningSummary,
-    staticallyRecalled,
+    staticallyRecalled: selectedStaticFiles,
     usage: response.usage,
     warnings,
   });

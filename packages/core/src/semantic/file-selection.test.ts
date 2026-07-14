@@ -79,7 +79,7 @@ describe("selectCandidateFiles", () => {
     expect(result.warnings).toContain("Filtered non-existing LLM candidate: src/missing.ts");
   });
 
-  it("applies topK to llmSelected while keeping staticallyRecalled as fallback", async () => {
+  it("keeps combined model and static candidates within topK", async () => {
     const result = await selectCandidateFiles({
       provider: providerReturning({
         candidateFiles: ["src/auth/login.ts", "src/ui/login-form.tsx"],
@@ -96,19 +96,16 @@ describe("selectCandidateFiles", () => {
     });
 
     expect(result.llmSelected).toEqual(["src/auth/login.ts", "src/ui/login-form.tsx"]);
-    expect(result.staticallyRecalled).toEqual(["src/auth/session.ts", "README.md"]);
+    expect(result.staticallyRecalled).toEqual(["src/auth/session.ts"]);
     expect(result.candidateFiles).toEqual([
       "src/auth/login.ts",
       "src/ui/login-form.tsx",
       "src/auth/session.ts",
-      "README.md",
     ]);
-    expect(result.warnings).toContain(
-      "Candidate list exceeded topK=3 due to static recall fallback.",
-    );
+    expect(result.warnings).toContain("Static recall truncated to preserve topK=3.");
   });
 
-  it("truncates llmSelected to topK but still appends staticallyRecalled", async () => {
+  it("does not append static recall when model candidates consume topK", async () => {
     const result = await selectCandidateFiles({
       provider: providerReturning({
         candidateFiles: ["src/auth/login.ts", "src/ui/login-form.tsx", "README.md"],
@@ -124,16 +121,10 @@ describe("selectCandidateFiles", () => {
     });
 
     expect(result.llmSelected).toEqual(["src/auth/login.ts", "src/ui/login-form.tsx"]);
-    expect(result.staticallyRecalled).toEqual(["src/auth/session.ts"]);
-    expect(result.candidateFiles).toEqual([
-      "src/auth/login.ts",
-      "src/ui/login-form.tsx",
-      "src/auth/session.ts",
-    ]);
+    expect(result.staticallyRecalled).toEqual([]);
+    expect(result.candidateFiles).toEqual(["src/auth/login.ts", "src/ui/login-form.tsx"]);
     expect(result.warnings).toContain("LLM candidate list truncated to topK=2.");
-    expect(result.warnings).toContain(
-      "Candidate list exceeded topK=2 due to static recall fallback.",
-    );
+    expect(result.warnings).toContain("Static recall truncated to preserve topK=2.");
   });
 
   it("rejects invalid provider output at the business layer when provider skips schema validation", async () => {

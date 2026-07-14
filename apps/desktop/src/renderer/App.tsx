@@ -1,4 +1,5 @@
 import { reportTemplates } from "@donecheck/templates";
+import { Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BundledFreePreflightResponse,
@@ -13,6 +14,7 @@ import type {
 import type { ProviderErrorKind } from "../provider-error-kind.js";
 import { type ProviderErrorUx, providerErrorUxForKind } from "../provider-error-ux.js";
 import { type DesktopSettingsPatch, defaultDesktopSettings } from "../settings-model.js";
+import { AppearanceMenu } from "./AppearanceMenu.js";
 import { DecompositionReviewPanel } from "./DecompositionReviewPanel.js";
 import { ReportPreview } from "./ReportPreview.js";
 import { ProviderErrorNotice, SettingsPanel } from "./SettingsPanel.js";
@@ -26,6 +28,13 @@ import {
   startAnalyzeFlow,
 } from "./analyze-flow.js";
 import { applyUserInput, saveHistoryWithFeedback } from "./app-feedback.js";
+import {
+  type AppearancePreferences,
+  defaultAppearance,
+  persistAppearancePreferences,
+  readAppearancePreferences,
+  resolveTheme,
+} from "./appearance.js";
 import { getDesktopOperationFeedback } from "./desktop-operation-feedback.js";
 import { copyRepairPrompt } from "./repair-prompt-copy.js";
 
@@ -74,11 +83,22 @@ export function App() {
   const [notice, setNotice] = useState("");
   const [deletedHistoryId, setDeletedHistoryId] = useState<string>();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [appearance, setAppearance] = useState<AppearancePreferences>(() =>
+    window.localStorage === undefined
+      ? defaultAppearance
+      : readAppearancePreferences(window.localStorage),
+  );
+  const [systemPrefersDark, setSystemPrefersDark] = useState(
+    () =>
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
   const activeRequestId = useRef<string>();
   const settingsButton = useRef<HTMLButtonElement>(null);
   const zh = settings.locale === "zh-CN";
   const busy = analysis.kind === "decomposing" || analysis.kind === "analyzing";
   const completed = analysis.kind === "complete" ? analysis : undefined;
+  const resolvedTheme = resolveTheme(appearance.mode, systemPrefersDark);
 
   useEffect(() => {
     void loadSettings();
@@ -91,6 +111,21 @@ export function App() {
     document.documentElement.lang = settings.locale;
   }, [settings.locale]);
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (window.localStorage !== undefined) {
+      persistAppearancePreferences(window.localStorage, appearance);
+    }
+    document.documentElement.dataset.accent = appearance.accent;
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [appearance, resolvedTheme]);
   useEffect(() => {
     if (settings.providerMode !== "bundled-free" || workspaceDir.trim().length === 0) {
       setBundledFreePreflight(undefined);
@@ -451,16 +486,26 @@ export function App() {
             <span>{zh ? "软件验收" : "Software verification"}</span>
           </div>
         </div>
-        <button
-          aria-haspopup="dialog"
-          className="utility-button"
-          ref={settingsButton}
-          disabled={busy}
-          onClick={() => setSettingsOpen(true)}
-          type="button"
-        >
-          {zh ? "设置" : "Settings"}
-        </button>
+        <div className="product-actions">
+          <AppearanceMenu
+            locale={settings.locale}
+            onChange={setAppearance}
+            preferences={appearance}
+            resolvedTheme={resolvedTheme}
+          />
+          <button
+            aria-haspopup="dialog"
+            aria-label={zh ? "设置" : "Settings"}
+            className="icon-button"
+            ref={settingsButton}
+            disabled={busy}
+            onClick={() => setSettingsOpen(true)}
+            title={zh ? "设置" : "Settings"}
+            type="button"
+          >
+            <Settings aria-hidden="true" />
+          </button>
+        </div>
       </header>
       <SettingsPanel
         credentialStatus={credentialStatus}

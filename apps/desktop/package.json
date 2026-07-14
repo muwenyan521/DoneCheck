@@ -47,6 +47,7 @@
     "@donecheck/shared": "workspace:*",
     "@donecheck/templates": "workspace:*",
     "better-sqlite3": "catalog:",
+    "lucide-react": "^1.24.0",
     "openai": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

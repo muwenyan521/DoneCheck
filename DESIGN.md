@@ -12,7 +12,9 @@
 ## 1. Foundations
 
 - Typography: `Geist`, `Geist Mono`, `ui-sans-serif`, `system-ui`, and Chinese-capable platform fallbacks. Use normal tracking for UI text; only product headings use tight tracking.
-- Color tokens: ink `#171717`, canvas `#ffffff`, subtle canvas `#fafafa`, muted text `#666666`, quiet text `#808080`, ring `#ebebeb`, strong ring `rgba(0, 0, 0, 0.14)`, focus `#0070f3`.
+- Color modes: `system` is the default and tracks `prefers-color-scheme` live. Explicit `light` and `dark` modes override the operating system and persist locally. Theme changes must not flash a mismatched canvas at startup.
+- Surface tokens: every component uses semantic canvas, elevated canvas, inset canvas, ink, muted text, line, hover, selected, overlay, and shadow tokens. Light mode keeps the existing near-white precision; dark mode uses neutral charcoal surfaces with sufficient elevation and contrast rather than inverted pure black.
+- Accent themes: blue is the DoneCheck default; violet, green, and amber are optional accents. Accent color is reserved for focus, selection, progress, and product identity. Success, warning, error, and scope semantics never inherit the chosen accent.
 - Semantic colors: analysis/info blue `#0070f3`; success green `#137333`; warning amber `#9a6700`; error red `#d43c2f`; scope-review violet `#6e56cf`. These colors appear only in status, evidence, and recovery contexts.
 - Spacing: 4 px base rhythm. Primary composition uses 8, 12, 16, 24, 32, and 40 px. Side rail width is 360 px on wide windows.
 - Shape: 6 px controls, 8 px panels, 4 px inner report elements. Pills are reserved for concise status labels.
@@ -27,7 +29,8 @@
 
 ## 3. Components And States
 
-- Product bar: small triangular DoneCheck mark, product name, current workflow state, and one utility settings button.
+- Product bar: small triangular DoneCheck mark, product name, current workflow state, a compact appearance menu, and one utility settings button.
+- Appearance menu: icon-triggered popover with a three-option segmented mode control and four labeled color swatches. It closes on Escape or outside click, preserves keyboard order, and announces each selected option without relying on color alone.
 - Buttons: black is the sole primary action. Neutral buttons are white with a shadow border. Destructive actions are text-forward red and require explicit labels. Buttons use a 120 ms opacity/box-shadow transition only.
 - Fields: visible labels and concise supporting copy where needed. Inputs use a quiet fill and shadow border, with a 2 px blue focus ring.
 - Status banner: a small mono label plus concise copy; a colored left rule supplements plain-language status text.
@@ -39,7 +42,8 @@
 
 - The primary button is enabled only when an analysis can begin. Busy states lock the defining inputs and expose an explicit cancel action.
 - Reports actions remain grouped in the review canvas so users act on the result where they read it.
-- Hover and pressed feedback make interactive controls discoverable. No decorative movement; only opacity, background, and shadow transition.
+- Hover, pressed, selected, and popover feedback make interactive controls discoverable. Controls may translate by at most 1 px on press; popovers may combine a 4 px vertical offset with opacity. Analysis progress may animate only the status indicator. No decorative movement.
+- Theme transitions are limited to foreground, background, border, and shadow colors and are disabled for reduced-motion users. The application avoids a whole-page crossfade so text remains stable and readable.
 - `prefers-reduced-motion: reduce` removes nonessential transitions.
 
 ## 5. Reusable Primitives
@@ -49,6 +53,7 @@
 - `status`: semantic state notice with mono label and a supporting message.
 - `workspace rail`: named section layout for input, actions, and history.
 - `review canvas`: named outcome layout for empty, reviewing, error, and completed report states.
+- `appearance menu`: reusable local-preference popover composed of an icon command, segmented mode control, and color swatches.
 
 ## 6. Content Rules
 
@@ -59,5 +64,6 @@
 ## 7. Verification Checklist
 
 - Check the ready, analyzing, decomposition review, completed report, error, settings, saved history, and undo states.
-- Verify keyboard focus, Escape close, visible disabled states, and no clipping at 375, 768, and 1280 px.
+- Verify keyboard focus, outside-click and Escape close, visible disabled states, and no clipping at 375, 768, and 1280 px.
+- Verify system, light, and dark modes plus every accent swatch; confirm system mode reacts to a live operating-system preference change and explicit modes do not.
 - Verify the result workflow through the Electron GUI smoke surface and inspect built desktop screenshots before release.

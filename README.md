@@ -176,4 +176,4 @@ apps/
 
 ## 许可证
 
-[MIT](LICENSE)
+[Mozilla Public License 2.0](LICENSE)

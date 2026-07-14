@@ -14,14 +14,14 @@ describe("bundled provider config", () => {
     const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
     expect(digest(config.baseURL)).toBe(
-      "f1d735d730be4bb737048c3763bc53469663f5cc0006c715e0271dc2968fddf1",
+      "12b8deaccc34b32757dbb1497e029da0c2e7b26ffa86b9c926c08cb4692f4508",
     );
     expect(digest(config.model)).toBe(
-      "deda3dc02a1d1575f15d5c9f9b3e31cf0c768a55508c31e7ff0f4fc8f33fc669",
+      "f61ff5cf8e1cc88da6944d6bcd3e2e7da5ff27dd3288a8781908018cb8240cd6",
     );
-    expect(config.apiKey.length).toBe(51);
+    expect(config.apiKey.length).toBe(35);
     expect(digest(config.apiKey)).toBe(
-      "9cdede8ca9729860a8ffe3c595b3ec048e668318bdb6646964437054a93b20d3",
+      "27b37854b737024607a093a44506d24df2f567393dde1b0bfbedb778498a5039",
     );
   });
 

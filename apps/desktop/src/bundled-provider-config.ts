@@ -10,17 +10,17 @@ interface EncodedValue {
 }
 
 const encodedBaseUrl = {
-  fragments: ["nBI0ouY02cs", "Vc7vzKovYEj", "Pm4iPUwxIx", "+rYwisUcdw=="],
+  fragments: ["uDbYwwp//", "eEkndwWeL", "HvbJDABjH", "6tjCKxRx3"],
   seed: 31,
 } as const satisfies EncodedValue;
 
 const encodedModel = {
-  fragments: ["pA5Bj9", "V1OehI", "GZ/SPg=="],
+  fragments: ["gdM2YqNR", "B5yMM2qj", "DkSOxz0="],
   seed: 89,
 } as const satisfies EncodedValue;
 
 const encodedApiKey = {
-  fragments: ["kdQiNY0EGYKkDUfpO2", "2G6zhh60Bug+keP4", "o3XrbdYU/aN3iM7j", "htoTRj0c8mZLQzAo3u"],
+  fragments: ["f2OKTRuHr2k+", "iEQZ0/ljMYpH", "T9CrNDnwQByD", "/2Zr+UACje4="],
   seed: 157,
 } as const satisfies EncodedValue;
 

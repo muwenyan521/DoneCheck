@@ -9,6 +9,7 @@ import type {
 } from "../semantic/provider.js";
 import {
   WorkspaceValidationError,
+  inspectWorkspaceVolume,
   runDoneCheckPipelineNode,
   validateWorkspace,
 } from "./node-adapter.js";
@@ -47,6 +48,15 @@ const stubProvider: LLMProvider = {
     throw new Error(`unexpected schema ${input.schemaName}`);
   },
 };
+
+function volumeFor(...contents: readonly string[]) {
+  const sizes = contents.map((content) => Buffer.byteLength(content));
+  return {
+    analyzableFileCount: sizes.length,
+    largestAnalyzableFileBytes: Math.max(...sizes),
+    totalAnalyzableBytes: sizes.reduce((total, size) => total + size, 0),
+  };
+}
 
 describe("runDoneCheckPipelineNode workspace scan", () => {
   let workspace: string;
@@ -102,6 +112,21 @@ describe("runDoneCheckPipelineNode workspace scan", () => {
     expect(calls).toBe(0);
   });
 
+  it("honors cancellation before workspace traversal invokes the provider", async () => {
+    writeFileSync(join(workspace, "real.ts"), 'export const localStorage = "real";\n');
+    const controller = new AbortController();
+    controller.abort(new Error("analysis canceled"));
+
+    await expect(
+      runDoneCheckPipelineNode({
+        workspacePath: workspace,
+        requirement: "x",
+        provider: stubProvider,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("analysis canceled");
+  });
+
   it("does not infinite-loop on symlink cycles", async () => {
     writeFileSync(join(workspace, "real.ts"), 'export const localStorage = "real";\n');
     symlinkSync(workspace, join(workspace, "self-loop"));
@@ -146,5 +171,112 @@ describe("runDoneCheckPipelineNode workspace scan", () => {
     } finally {
       rmSync(outsideDir, { recursive: true, force: true });
     }
+  });
+
+  it("skips generated and local-tool directories by default", async () => {
+    writeFileSync(join(workspace, "real.ts"), 'export const localStorage = "real";\n');
+    for (const ignoredDir of [".direnv", ".omo", ".trae", ".turbo", ".worktrees", "tmp"]) {
+      mkdirSync(join(workspace, ignoredDir), { recursive: true });
+      writeFileSync(join(workspace, ignoredDir, "generated.ts"), 'export const auth = "noise";\n');
+    }
+
+    const result = await runDoneCheckPipelineNode({
+      workspacePath: workspace,
+      requirement: "use localStorage for auth session",
+      claim: "localStorage auth is implemented",
+      provider: stubProvider,
+      requirements: [{ id: "REQ-1", text: "use localStorage for auth session" }],
+      claims: [{ id: "CLAIM-1", text: "localStorage auth is implemented" }],
+    });
+
+    expect(result.staticSignals).toEqual([
+      { filePath: "real.ts", keyword: "localStorage", strength: "strong" },
+    ]);
+  });
+
+  it("honors workspace-relative file and directory exclusions", async () => {
+    writeFileSync(join(workspace, "real.ts"), 'export const localStorage = "real";\n');
+    mkdirSync(join(workspace, "private"), { recursive: true });
+    mkdirSync(join(workspace, "src", "generated"), { recursive: true });
+    writeFileSync(join(workspace, "private", "config.json"), '{"auth":"secret"}\n');
+    writeFileSync(
+      join(workspace, "src", "generated", "client.ts"),
+      'export const auth = "noise";\n',
+    );
+
+    const result = await runDoneCheckPipelineNode({
+      workspacePath: workspace,
+      requirement: "use localStorage",
+      provider: stubProvider,
+      requirements: [{ id: "REQ-1", text: "use localStorage" }],
+      ignore: ["./private/config.json", "src\\generated\\"],
+    });
+
+    expect(result.staticSignals).toEqual([
+      { filePath: "real.ts", keyword: "localStorage", strength: "strong" },
+    ]);
+  });
+
+  it("counts analyzable files and their exact byte sizes", async () => {
+    const first = "export const answer = 42;\n";
+    const second = "# 需求\n完成检查\n";
+    writeFileSync(join(workspace, "first.ts"), first);
+    mkdirSync(join(workspace, "docs"));
+    writeFileSync(join(workspace, "docs", "README.md"), second);
+    writeFileSync(join(workspace, "image.png"), "not analyzable");
+
+    const volume = await inspectWorkspaceVolume({ workspacePath: workspace });
+
+    expect(volume).toEqual(volumeFor(first, second));
+  });
+
+  it("excludes default and user-supplied relative paths from workspace volume", async () => {
+    const included = "export const included = true;\n";
+    writeFileSync(join(workspace, "real.ts"), included);
+    for (const ignoredDir of ["node_modules", "dist", ".git", ".cache", ".omo", "coverage"]) {
+      mkdirSync(join(workspace, ignoredDir), { recursive: true });
+      writeFileSync(join(workspace, ignoredDir, "ignored.ts"), "ignored content");
+    }
+    mkdirSync(join(workspace, "private"));
+    mkdirSync(join(workspace, "src", "generated"), { recursive: true });
+    writeFileSync(join(workspace, "private", "config.json"), '{"secret":true}\n');
+    writeFileSync(join(workspace, "src", "generated", "client.ts"), "generated client");
+
+    const volume = await inspectWorkspaceVolume({
+      workspacePath: workspace,
+      ignore: ["./private/config.json", "src\\generated\\"],
+    });
+
+    expect(volume).toEqual(volumeFor(included));
+    await expect(
+      validateWorkspace(workspace, ["real.ts", "private", "src/generated"]),
+    ).rejects.toMatchObject({ code: "workspace-no-analyzable-files" });
+  });
+
+  it("excludes file and directory symlinks from workspace volume", async () => {
+    const outsideDir = mkdtempSync(join(tmpdir(), "donecheck-volume-out-"));
+    try {
+      const included = "export const included = true;\n";
+      writeFileSync(join(workspace, "real.ts"), included);
+      writeFileSync(join(outsideDir, "outside.ts"), "outside source");
+      symlinkSync(join(outsideDir, "outside.ts"), join(workspace, "linked-file.ts"));
+      symlinkSync(outsideDir, join(workspace, "linked-directory"));
+
+      const volume = await inspectWorkspaceVolume({ workspacePath: workspace });
+
+      expect(volume).toEqual(volumeFor(included));
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("honors cancellation before workspace volume traversal", async () => {
+    writeFileSync(join(workspace, "real.ts"), "export {};\n");
+    const controller = new AbortController();
+    controller.abort(new Error("inspection canceled"));
+
+    await expect(
+      inspectWorkspaceVolume({ workspacePath: workspace, signal: controller.signal }),
+    ).rejects.toThrow("inspection canceled");
   });
 });

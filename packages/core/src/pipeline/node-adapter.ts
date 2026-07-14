@@ -1,11 +1,25 @@
-import { constants } from "node:fs";
-import { access, lstat, readFile, readdir } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { access, lstat, open, readdir } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { relative } from "node:path";
 import type { LLMProvider } from "../semantic/provider.js";
 import type { SemanticClaim, SemanticRequirement } from "../semantic/schema.js";
 import { orchestrateAnalysis } from "./orchestrator.js";
 
-const DEFAULT_IGNORE = new Set(["node_modules", "dist", ".git", ".cache", "build", "coverage"]);
+const DEFAULT_IGNORE = new Set([
+  "node_modules",
+  "dist",
+  ".git",
+  ".cache",
+  ".direnv",
+  ".omo",
+  ".trae",
+  ".turbo",
+  ".worktrees",
+  "build",
+  "coverage",
+  "tmp",
+]);
 const ANALYZABLE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt)$/u;
 
 export type WorkspaceValidationErrorCode =
@@ -26,10 +40,63 @@ export class WorkspaceValidationError extends Error {
   }
 }
 
+export interface InspectWorkspaceVolumeInput {
+  readonly workspacePath: string;
+  readonly ignore?: readonly string[];
+  readonly signal?: AbortSignal;
+}
+
+export interface WorkspaceVolume {
+  readonly analyzableFileCount: number;
+  readonly totalAnalyzableBytes: number;
+  readonly largestAnalyzableFileBytes: number;
+}
+
 export async function validateWorkspace(
   workspacePath: string,
   ignore: readonly string[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
+  await inspectWorkspaceVolume({
+    workspacePath,
+    ignore,
+    ...(signal === undefined ? {} : { signal }),
+  });
+}
+
+export async function inspectWorkspaceVolume(
+  input: InspectWorkspaceVolumeInput,
+): Promise<WorkspaceVolume> {
+  input.signal?.throwIfAborted();
+  await validateWorkspaceRoot(input.workspacePath);
+  const volume = {
+    analyzableFileCount: 0,
+    totalAnalyzableBytes: 0,
+    largestAnalyzableFileBytes: 0,
+  };
+  await walk({
+    root: input.workspacePath,
+    dir: input.workspacePath,
+    ignore: buildIgnoreMatcher(input.ignore ?? []),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    onFile: async (path, _relativePath, expected) => {
+      const size = await measureUnchangedRegularFile(path, expected);
+      if (size === undefined) return;
+      volume.analyzableFileCount += 1;
+      volume.totalAnalyzableBytes += size;
+      volume.largestAnalyzableFileBytes = Math.max(volume.largestAnalyzableFileBytes, size);
+    },
+  });
+  if (volume.analyzableFileCount === 0) {
+    throw new WorkspaceValidationError(
+      "workspace-no-analyzable-files",
+      `Workspace has no analyzable files: ${input.workspacePath}`,
+    );
+  }
+  return volume;
+}
+
+async function validateWorkspaceRoot(workspacePath: string): Promise<void> {
   if (workspacePath.trim().length === 0) {
     throw new WorkspaceValidationError("workspace-empty-path", "Workspace path is required.");
   }
@@ -66,12 +133,6 @@ export async function validateWorkspace(
   if (entries.length === 0) {
     throw new WorkspaceValidationError("workspace-empty", `Workspace is empty: ${workspacePath}`);
   }
-  if (!(await containsAnalyzableFile(workspacePath, new Set([...DEFAULT_IGNORE, ...ignore])))) {
-    throw new WorkspaceValidationError(
-      "workspace-no-analyzable-files",
-      `Workspace has no analyzable files: ${workspacePath}`,
-    );
-  }
 }
 
 export interface RunDoneCheckPipelineNodeInput {
@@ -89,10 +150,20 @@ export interface RunDoneCheckPipelineNodeInput {
 
 export async function runDoneCheckPipelineNode(input: RunDoneCheckPipelineNodeInput) {
   input.signal?.throwIfAborted();
-  await validateWorkspace(input.workspacePath, input.ignore);
-  const ignore = new Set([...DEFAULT_IGNORE, ...(input.ignore ?? [])]);
+  await validateWorkspace(input.workspacePath, input.ignore, input.signal);
+  input.signal?.throwIfAborted();
+  const ignore = buildIgnoreMatcher(input.ignore ?? []);
   const files: { relativePath: string; content: string }[] = [];
-  await walk(input.workspacePath, input.workspacePath, ignore, files);
+  await walk({
+    root: input.workspacePath,
+    dir: input.workspacePath,
+    ignore,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    onFile: async (path, relativePath, expected) => {
+      const content = await readUnchangedRegularFile(path, expected);
+      if (content !== undefined) files.push({ relativePath, content });
+    },
+  });
   return orchestrateAnalysis({
     requirement: input.requirement,
     ...(input.claim === undefined ? {} : { claim: input.claim }),
@@ -106,21 +177,27 @@ export async function runDoneCheckPipelineNode(input: RunDoneCheckPipelineNodeIn
   });
 }
 
-async function walk(
-  root: string,
-  dir: string,
-  ignore: Set<string>,
-  out: { relativePath: string; content: string }[],
-): Promise<void> {
+interface WalkInput {
+  readonly root: string;
+  readonly dir: string;
+  readonly ignore: IgnoreMatcher;
+  readonly signal?: AbortSignal;
+  readonly onFile: (path: string, relativePath: string, expected: Stats) => Promise<void>;
+}
+
+async function walk(input: WalkInput): Promise<void> {
+  input.signal?.throwIfAborted();
   let entries: string[];
   try {
-    entries = await readdir(dir);
+    entries = await readdir(input.dir);
   } catch {
     return;
   }
   for (const entry of entries) {
-    if (ignore.has(entry)) continue;
-    const full = `${dir}/${entry}`;
+    input.signal?.throwIfAborted();
+    const full = `${input.dir}/${entry}`;
+    const relativePath = relative(input.root, full).replaceAll("\\", "/");
+    if (input.ignore.matches(entry, relativePath)) continue;
     let s: Awaited<ReturnType<typeof lstat>>;
     try {
       s = await lstat(full);
@@ -129,36 +206,62 @@ async function walk(
     }
     if (s.isSymbolicLink()) continue;
     if (s.isDirectory()) {
-      await walk(root, full, ignore, out);
+      await walk({ ...input, dir: full });
     } else if (ANALYZABLE_FILE.test(entry)) {
-      const content = await readFile(full, "utf8");
-      out.push({ relativePath: relative(root, full).replaceAll("\\", "/"), content });
+      await input.onFile(full, relativePath, s);
     }
   }
 }
 
-async function containsAnalyzableFile(dir: string, ignore: Set<string>): Promise<boolean> {
-  let entries: string[];
+interface IgnoreMatcher {
+  matches(entry: string, relativePath: string): boolean;
+}
+
+function buildIgnoreMatcher(extra: readonly string[]): IgnoreMatcher {
+  const names = new Set(DEFAULT_IGNORE);
+  const paths: string[] = [];
+  for (const value of extra) {
+    const normalized = value.replaceAll("\\", "/").replace(/^\.\//u, "").replace(/\/$/u, "");
+    if (normalized.includes("/") && !paths.includes(normalized)) paths.push(normalized);
+    else names.add(normalized);
+  }
+  return {
+    matches: (entry, relativePath) =>
+      names.has(entry) ||
+      paths.some((path) => relativePath === path || relativePath.startsWith(`${path}/`)),
+  };
+}
+
+async function readUnchangedRegularFile(
+  path: string,
+  expected: Stats,
+): Promise<string | undefined> {
+  return withUnchangedRegularFile(path, expected, (handle) => handle.readFile("utf8"));
+}
+
+async function measureUnchangedRegularFile(
+  path: string,
+  expected: Stats,
+): Promise<number | undefined> {
+  return withUnchangedRegularFile(path, expected, async (_handle, opened) => opened.size);
+}
+
+async function withUnchangedRegularFile<T>(
+  path: string,
+  expected: Stats,
+  consume: (handle: FileHandle, opened: Stats) => Promise<T>,
+): Promise<T | undefined> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    entries = await readdir(dir);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino) {
+      return undefined;
+    }
+    return await consume(handle, opened);
   } catch {
-    return false;
+    return undefined;
+  } finally {
+    await handle?.close();
   }
-  for (const entry of entries) {
-    if (ignore.has(entry)) continue;
-    const full = `${dir}/${entry}`;
-    let stats: Awaited<ReturnType<typeof lstat>>;
-    try {
-      stats = await lstat(full);
-    } catch {
-      continue;
-    }
-    if (stats.isSymbolicLink()) continue;
-    if (stats.isDirectory()) {
-      if (await containsAnalyzableFile(full, ignore)) return true;
-    } else if (ANALYZABLE_FILE.test(entry)) {
-      return true;
-    }
-  }
-  return false;
 }

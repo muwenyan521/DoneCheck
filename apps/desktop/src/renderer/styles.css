@@ -589,6 +589,11 @@ label {
   color: var(--danger-ink);
 }
 
+.free-tier-warning {
+  color: var(--amber);
+  font-weight: 600;
+}
+
 .status {
   align-items: start;
   border-left: 2px solid var(--line-strong);

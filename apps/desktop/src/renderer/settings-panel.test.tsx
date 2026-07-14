@@ -85,6 +85,7 @@ describe("SettingsPanel", () => {
 
     expect(html).toContain("内置免费分析");
     expect(html).toContain("每天可完成 3 次内置免费分析");
+    expect(html).toContain("内置免费模型响应可能不稳定");
     expect(html).not.toContain("在线分析地址");
     expect(html).not.toContain("访问密钥");
   });

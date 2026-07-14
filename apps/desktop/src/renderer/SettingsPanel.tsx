@@ -170,8 +170,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <p className="settings-help">
             {draft.providerMode === "bundled-free"
               ? zh
-                ? "每天可完成 3 次内置免费分析，仅支持不超过 250 个可分析文件、总计 2 MiB 的项目。"
-                : "Three complete built-in free analyses are available daily for projects up to 250 analyzable files and 2 MiB total."
+                ? "每天可完成 3 次内置免费分析，仅支持不超过 250 个可分析文件、总计 2 MiB 的项目。内置免费模型响应可能不稳定，重要审核请改用自定义在线分析。"
+                : "Three complete built-in free analyses are available daily for projects up to 250 analyzable files and 2 MiB total. The built-in free model can be unstable, so use a custom online provider for important reviews."
               : draft.providerMode === "mock"
                 ? zh
                   ? "离线检查可直接使用。"

@@ -674,6 +674,11 @@ export function App() {
                   ? "支持不超过 250 个可分析文件、总计 2 MiB，单文件 256 KiB。"
                   : "Up to 250 analyzable files, 2 MiB total, and 256 KiB per file."}
               </span>
+              <span className="free-tier-warning">
+                {zh
+                  ? "内置免费模型响应可能不稳定，重要审核请改用自定义在线分析。"
+                  : "The built-in free model can be unstable. Use a custom online provider for important reviews."}
+              </span>
               {bundledFreePreflight?.eligible === false && (
                 <span className="free-tier-blocked">
                   {zh

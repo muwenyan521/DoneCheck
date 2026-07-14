@@ -29,6 +29,7 @@ export const DESKTOP_API_KEYS = [
   "donecheck:history:clear",
   "donecheck:settings:get",
   "donecheck:settings:set",
+  "donecheck:settings:set-with-session-api-key",
   "donecheck:settings:reset",
   "donecheck:credentials:set-session-api-key",
   "donecheck:credentials:clear-session-api-key",
@@ -166,6 +167,15 @@ export interface SettingsSetRequest {
   readonly patch: DesktopSettingsPatch;
 }
 
+export interface SettingsSetWithSessionApiKeyRequest extends SettingsSetRequest {
+  readonly apiKey?: string;
+}
+
+export interface SettingsSetWithSessionApiKeyResponse {
+  readonly credentialStatus: CredentialStatus;
+  readonly settings: DesktopSettings;
+}
+
 export interface CredentialSetSessionApiKeyRequest {
   readonly apiKey: string;
 }
@@ -226,6 +236,9 @@ export interface DesktopBundledFreeApi {
 export interface DesktopSettingsApi {
   get(): Promise<DesktopIpcResult<DesktopSettings>>;
   set(request: SettingsSetRequest): Promise<DesktopIpcResult<DesktopSettings>>;
+  setWithSessionApiKey(
+    request: SettingsSetWithSessionApiKeyRequest,
+  ): Promise<DesktopIpcResult<SettingsSetWithSessionApiKeyResponse>>;
   reset(): Promise<DesktopIpcResult<DesktopSettings>>;
 }
 

@@ -95,6 +95,9 @@ export function assertValidIpcArguments(
     case "donecheck:settings:set":
       validateSettingsSet(request);
       return;
+    case "donecheck:settings:set-with-session-api-key":
+      validateSettingsSetWithSessionApiKey(request);
+      return;
     case "donecheck:credentials:set-session-api-key":
       validateSingleStringRequest(request, "apiKey", 1, 16_384);
       return;
@@ -215,6 +218,12 @@ function validateSettingsSet(value: unknown): void {
     const field = value.patch[key];
     if (field !== undefined) validateStringArray(field, key, 500, 4_096);
   }
+}
+
+function validateSettingsSetWithSessionApiKey(value: unknown): void {
+  assertRecordWithKeys(value, ["patch", "apiKey"]);
+  validateSettingsSet({ patch: value.patch });
+  if (value.apiKey !== undefined) validateString(value.apiKey, "apiKey", 1, 16_384);
 }
 
 function validateOptionalPresentation(value: Record<string, unknown>): void {

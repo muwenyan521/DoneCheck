@@ -46,6 +46,8 @@ import type {
   RenderHtmlResponse,
   SelectWorkspaceResponse,
   SettingsSetRequest,
+  SettingsSetWithSessionApiKeyRequest,
+  SettingsSetWithSessionApiKeyResponse,
 } from "./ipc-contract.js";
 import { classifyProviderErrorKind } from "./provider-error-kind.js";
 import type { DesktopSettings, SettingsStore } from "./settings-store.js";
@@ -130,6 +132,8 @@ export function createDesktopIpcHandlers(
     settings: {
       get: () => withStructuredErrors(() => settingsGet(dependencies)),
       set: (request) => withStructuredErrors(() => settingsSet(request, dependencies)),
+      setWithSessionApiKey: (request) =>
+        withStructuredErrors(() => settingsSetWithSessionApiKey(request, dependencies)),
       reset: () => withStructuredErrors(() => settingsReset(dependencies)),
     },
     credentials: {
@@ -386,6 +390,26 @@ async function settingsSet(
   dependencies: DesktopIpcHandlerDependencies,
 ): Promise<DesktopSettings> {
   return requireSettingsStore(dependencies).set(request.patch);
+}
+
+async function settingsSetWithSessionApiKey(
+  request: SettingsSetWithSessionApiKeyRequest,
+  dependencies: DesktopIpcHandlerDependencies,
+): Promise<SettingsSetWithSessionApiKeyResponse> {
+  const settingsStore = requireSettingsStore(dependencies);
+  const credentials = requireCredentials(dependencies);
+  const previousSettings = settingsStore.get();
+  const settings = settingsStore.set(request.patch);
+  try {
+    const credentialStatus =
+      request.apiKey === undefined
+        ? credentials.getStatus()
+        : credentials.setSessionApiKey(request.apiKey);
+    return { credentialStatus, settings };
+  } catch (error) {
+    settingsStore.set(previousSettings);
+    throw error;
+  }
 }
 
 async function settingsReset(

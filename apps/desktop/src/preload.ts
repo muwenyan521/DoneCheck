@@ -26,6 +26,8 @@ import {
   type RenderHtmlRequest,
   type SelectWorkspaceResponse,
   type SettingsSetRequest,
+  type SettingsSetWithSessionApiKeyRequest,
+  type SettingsSetWithSessionApiKeyResponse,
 } from "./ipc-contract.js";
 import type { DesktopSettings } from "./settings-store.js";
 
@@ -60,6 +62,11 @@ const api: DesktopApi = {
   settings: {
     get: () => invoke<DesktopSettings>("donecheck:settings:get"),
     set: (req: SettingsSetRequest) => invoke<DesktopSettings>("donecheck:settings:set", req),
+    setWithSessionApiKey: (req: SettingsSetWithSessionApiKeyRequest) =>
+      invoke<SettingsSetWithSessionApiKeyResponse>(
+        "donecheck:settings:set-with-session-api-key",
+        req,
+      ),
     reset: () => invoke<DesktopSettings>("donecheck:settings:reset"),
   },
   credentials: {

@@ -33,6 +33,7 @@ describe("preload/renderer contract", () => {
     const requiredChannels = [
       "donecheck:settings:get",
       "donecheck:settings:set",
+      "donecheck:settings:set-with-session-api-key",
       "donecheck:settings:reset",
       "donecheck:credentials:set-session-api-key",
       "donecheck:credentials:clear-session-api-key",

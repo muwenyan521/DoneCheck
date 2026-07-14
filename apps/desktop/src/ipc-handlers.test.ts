@@ -477,6 +477,29 @@ describe("desktop IPC handlers", () => {
     await expect(
       handlers.credentials.setSessionApiKey({ apiKey: "session-only-test-value" }),
     ).resolves.toEqual({ ok: true, data: { credentialStatus: "session" } });
+    await expect(
+      handlers.settings.setWithSessionApiKey({
+        apiKey: "replacement-session-key",
+        patch: { providerBaseUrl: "https://compatible.example/v1" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      data: {
+        credentialStatus: "session",
+        settings: expect.objectContaining({
+          providerBaseUrl: "https://compatible.example/v1",
+        }),
+      },
+    });
+    expect(credentials.getSessionApiKey()).toBe("replacement-session-key");
+    await expect(handlers.settings.setWithSessionApiKey({ patch: { topK: 7 } })).resolves.toEqual({
+      ok: true,
+      data: {
+        credentialStatus: "session",
+        settings: expect.objectContaining({ topK: 7 }),
+      },
+    });
+    expect(credentials.getSessionApiKey()).toBe("replacement-session-key");
     await expect(handlers.credentials.status()).resolves.toEqual({
       ok: true,
       data: { credentialStatus: "session" },
@@ -486,6 +509,78 @@ describe("desktop IPC handlers", () => {
       data: { credentialStatus: "none" },
     });
 
+    settingsStore.close();
+  });
+
+  it("does not change the session key when atomic provider settings validation fails", async () => {
+    const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+    const credentials = createSessionCredentialStore();
+    credentials.setSessionApiKey("existing-session-key");
+    const handlers = createDesktopIpcHandlers({ credentials, settingsStore });
+
+    await expect(
+      handlers.settings.setWithSessionApiKey({
+        apiKey: "replacement-session-key",
+        patch: { providerBaseUrl: "http://remote.example/v1" },
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "unknown" } });
+
+    expect(credentials.getSessionApiKey()).toBe("existing-session-key");
+    expect(settingsStore.get().providerBaseUrl).toBe("");
+    settingsStore.close();
+  });
+
+  it("does not change settings when atomic save dependencies are incomplete", async () => {
+    const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+    const handlers = createDesktopIpcHandlers({ settingsStore });
+
+    await expect(
+      handlers.settings.setWithSessionApiKey({ patch: { topK: 9 } }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "not-implemented" } });
+
+    expect(settingsStore.get().topK).toBe(5);
+    settingsStore.close();
+  });
+
+  it("rolls back settings when atomic credential replacement throws", async () => {
+    const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+    const credentials = createSessionCredentialStore();
+    const handlers = createDesktopIpcHandlers({
+      credentials: {
+        ...credentials,
+        setSessionApiKey: () => {
+          throw new Error("credential replacement failed");
+        },
+      },
+      settingsStore,
+    });
+
+    await expect(
+      handlers.settings.setWithSessionApiKey({
+        apiKey: "replacement-session-key",
+        patch: { topK: 9 },
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "unknown" } });
+
+    expect(settingsStore.get().topK).toBe(5);
+    settingsStore.close();
+  });
+
+  it("preserves environment credential status when atomic save omits a replacement key", async () => {
+    process.env.OPENAI_API_KEY = "env-key";
+    const settingsStore = createSettingsStore({ databasePath: ":memory:" });
+    const credentials = createSessionCredentialStore();
+    const handlers = createDesktopIpcHandlers({ credentials, settingsStore });
+
+    await expect(handlers.settings.setWithSessionApiKey({ patch: { topK: 6 } })).resolves.toEqual({
+      ok: true,
+      data: {
+        credentialStatus: "env",
+        settings: expect.objectContaining({ topK: 6 }),
+      },
+    });
+
+    expect(credentials.getSessionApiKey()).toBeUndefined();
     settingsStore.close();
   });
 

@@ -521,13 +521,21 @@ export function App() {
           setSettingsOpen(false);
           window.setTimeout(() => settingsButton.current?.focus(), 0);
         }}
-        onSaveSessionApiKey={async (apiKey) => {
-          const result = await desktopWindow.donecheck?.credentials.setSessionApiKey({ apiKey });
+        onSaveSettingsWithSessionApiKey={async (patch, apiKey) => {
+          const result = await desktopWindow.donecheck?.settings.setWithSessionApiKey({
+            ...(apiKey === undefined ? {} : { apiKey }),
+            patch,
+          });
           if (!result?.ok) return { ok: false };
           setCredentialStatus(result.data.credentialStatus);
+          setSettings(result.data.settings);
+          setNotice(
+            result.data.settings.locale === "zh-CN"
+              ? "设置已保存，将用于下一次分析。"
+              : "Settings saved for the next analysis.",
+          );
           return { ok: true };
         }}
-        onSettingsChange={updateSettings}
         onSettingsReset={async () => {
           const result = await desktopWindow.donecheck?.settings.reset();
           if (result?.ok) {

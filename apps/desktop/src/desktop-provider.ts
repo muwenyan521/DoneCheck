@@ -69,7 +69,7 @@ export function createSessionCredentialStore(): SessionCredentialStore {
   return {
     clearSessionApiKey: () => {
       sessionApiKey = undefined;
-      return "none";
+      return envCredentialStatus();
     },
     getSessionApiKey: () => sessionApiKey,
     getStatus: () => (sessionApiKey === undefined ? envCredentialStatus() : "session"),

@@ -90,6 +90,22 @@ describe("desktop provider assembly", () => {
     expect(typeof provider.generateObject).toBe("function");
   });
 
+  it("creates an OpenAI-compatible provider from a GUI session key without an environment key", () => {
+    Reflect.deleteProperty(process.env, "OPENAI_API_KEY");
+    const credentials = createSessionCredentialStore();
+    credentials.setSessionApiKey("session-key");
+    const factory = createDesktopProviderFactory({
+      credentials,
+      getSettings: () => ({
+        ...defaultDesktopSettings,
+        providerMode: "openai-compatible",
+      }),
+    });
+
+    expect(() => factory.createProvider()).not.toThrow();
+    expect(factory.getCredentialStatus()).toBe("session");
+  });
+
   it("falls back to OPENAI_API_KEY when no session key exists", () => {
     process.env.OPENAI_API_KEY = "env-key";
     process.env.OPENAI_BASE_URL = "https://env-compatible.example/v1";
@@ -109,7 +125,7 @@ describe("desktop provider assembly", () => {
   });
 
   it("returns a clear GUI error instead of silently falling back to mock without a key", () => {
-    process.env.OPENAI_API_KEY = undefined;
+    Reflect.deleteProperty(process.env, "OPENAI_API_KEY");
     const factory = createDesktopProviderFactory({
       credentials: createSessionCredentialStore(),
       getSettings: () => ({ ...defaultDesktopSettings, providerMode: "openai-compatible" }),
@@ -129,6 +145,15 @@ describe("desktop provider assembly", () => {
     expect(credentials.toJSON()).toEqual({ credentialStatus: "session" });
     credentials.clearSessionApiKey();
     expect(credentials.getStatus()).toBe("none");
+  });
+
+  it("falls back to environment credential status after clearing a session key", () => {
+    process.env.OPENAI_API_KEY = "env-key";
+    const credentials = createSessionCredentialStore();
+    credentials.setSessionApiKey("session-key");
+
+    expect(credentials.clearSessionApiKey()).toBe("env");
+    expect(credentials.getStatus()).toBe("env");
   });
 });
 
@@ -150,6 +175,8 @@ describe("resolveDesktopOpenAIClientOptions", () => {
     expect(options.baseURL).toBe("https://compatible.example/v1");
     expect(options.fetch).toBe(undiciFetch);
     expect(options.fetch).toBe(desktopFetch);
+    expect(options.maxRetries).toBe(0);
+    expect(options.timeout).toBe(120_000);
   });
 
   it("omits baseURL when not provided but still injects fetch", () => {
@@ -158,5 +185,7 @@ describe("resolveDesktopOpenAIClientOptions", () => {
     expect(options.apiKey).toBe("sk-test");
     expect(options.baseURL).toBeUndefined();
     expect(options.fetch).toBe(undiciFetch);
+    expect(options.maxRetries).toBe(0);
+    expect(options.timeout).toBe(120_000);
   });
 });

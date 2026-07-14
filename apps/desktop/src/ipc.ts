@@ -22,6 +22,7 @@ import type {
   HistorySaveRequest,
   RenderHtmlRequest,
   SettingsSetRequest,
+  SettingsSetWithSessionApiKeyRequest,
 } from "./ipc-contract.js";
 import { createDesktopIpcHandlers, defaultExportPath } from "./ipc-handlers.js";
 import { createSettingsStore } from "./settings-store.js";
@@ -103,6 +104,9 @@ export function registerIpcHandlers(rendererEntryUrl: string): void {
   register("donecheck:settings:get", rendererEntryUrl, () => handlers.settings.get());
   register("donecheck:settings:set", rendererEntryUrl, (req) =>
     handlers.settings.set(req as SettingsSetRequest),
+  );
+  register("donecheck:settings:set-with-session-api-key", rendererEntryUrl, (req) =>
+    handlers.settings.setWithSessionApiKey(req as SettingsSetWithSessionApiKeyRequest),
   );
   register("donecheck:settings:reset", rendererEntryUrl, () => handlers.settings.reset());
   register("donecheck:credentials:set-session-api-key", rendererEntryUrl, (req) =>

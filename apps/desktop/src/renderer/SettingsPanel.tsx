@@ -4,15 +4,19 @@ import type { Locale, ReportTemplateId } from "../ipc-contract.js";
 import type { ProviderErrorKind, ProviderErrorUx } from "../provider-error-ux.js";
 import type { DesktopSettings, DesktopSettingsPatch, ProviderMode } from "../settings-model.js";
 
+const maxSessionApiKeyLength = 16_384;
+
 export interface SettingsPanelProps {
   readonly isOpen: boolean;
   readonly locale: Locale;
   readonly settings: DesktopSettings;
   readonly credentialStatus: CredentialStatus;
   readonly onClose: () => void;
-  readonly onSettingsChange: (patch: DesktopSettingsPatch) => Promise<SettingsOperationResult>;
   readonly onSettingsReset: () => Promise<SettingsOperationResult>;
-  readonly onSaveSessionApiKey: (apiKey: string) => Promise<SettingsOperationResult>;
+  readonly onSaveSettingsWithSessionApiKey: (
+    patch: DesktopSettingsPatch,
+    apiKey?: string,
+  ) => Promise<SettingsOperationResult>;
   readonly onClearSessionApiKey: () => Promise<SettingsOperationResult>;
 }
 
@@ -33,6 +37,22 @@ export async function performSettingsOperation(input: {
   input.onSuccess();
 }
 
+export async function saveSettingsWithSessionApiKey(input: {
+  readonly apiKey: string;
+  readonly patch: DesktopSettingsPatch;
+  readonly onSaveSettingsWithSessionApiKey: (
+    patch: DesktopSettingsPatch,
+    apiKey?: string,
+  ) => Promise<SettingsOperationResult>;
+}): Promise<SettingsOperationResult> {
+  const apiKey = input.apiKey.trim();
+  if (apiKey.length > maxSessionApiKeyLength) return { ok: false };
+  return input.onSaveSettingsWithSessionApiKey(
+    input.patch,
+    apiKey.length === 0 ? undefined : apiKey,
+  );
+}
+
 export interface ProviderErrorNoticeProps {
   readonly error: ProviderErrorUx;
   readonly locale: Locale;
@@ -50,10 +70,15 @@ export function toSettingsPatch(draft: DesktopSettings): DesktopSettingsPatch {
   return draft;
 }
 
+export function canDismissSettingsPanel(submitting: boolean): boolean {
+  return !submitting;
+}
+
 export function SettingsPanel(props: SettingsPanelProps) {
   const [draft, setDraft] = useState(() => createSettingsDraft(props.settings));
   const [submitting, setSubmitting] = useState(false);
   const [operationError, setOperationError] = useState<string>();
+  const [apiKeyInput, setApiKeyInput] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstControlRef = useRef<HTMLButtonElement>(null);
   const zh = props.locale === "zh-CN";
@@ -61,6 +86,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
   useEffect(() => {
     if (!props.isOpen) return;
     setDraft(createSettingsDraft(props.settings));
+    setApiKeyInput("");
     setOperationError(undefined);
     window.setTimeout(() => firstControlRef.current?.focus(), 0);
   }, [props.isOpen, props.settings]);
@@ -72,7 +98,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
   }
 
   function closeWithoutSaving() {
+    if (!canDismissSettingsPanel(submitting)) return;
     setDraft(createSettingsDraft(props.settings));
+    setApiKeyInput("");
     setOperationError(undefined);
     props.onClose();
   }
@@ -124,7 +152,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </button>
         </div>
 
-        <fieldset>
+        <fieldset disabled={submitting}>
           <legend>{zh ? "分析方式" : "Analysis method"}</legend>
           <label>
             {zh ? "选择方式" : "Choose a method"}
@@ -171,10 +199,13 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 />
               </label>
               <SessionKeyInput
+                apiKeyInput={apiKeyInput}
                 credentialStatus={props.credentialStatus}
                 locale={props.locale}
+                onApiKeyInputChange={setApiKeyInput}
                 onClear={props.onClearSessionApiKey}
-                onSave={props.onSaveSessionApiKey}
+                onSubmittingChange={setSubmitting}
+                submitting={submitting}
               />
             </>
           )}
@@ -183,7 +214,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <details>
           <summary>{zh ? "高级选项" : "Advanced options"}</summary>
           <div className="settings-advanced">
-            <fieldset>
+            <fieldset disabled={submitting}>
               <legend>{zh ? "分析参数" : "Analysis options"}</legend>
               <label>
                 {zh ? "最多检查文件数" : "Maximum files to check"}
@@ -211,7 +242,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
               />
             </fieldset>
 
-            <fieldset>
+            <fieldset disabled={submitting}>
               <legend>{zh ? "报告显示" : "Report display"}</legend>
               <div className="switch-row">
                 <label>
@@ -242,7 +273,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
               </div>
             </fieldset>
 
-            <fieldset>
+            <fieldset disabled={submitting}>
               <legend>{zh ? "项目与记录" : "Project and saved reports"}</legend>
               <label>
                 {zh ? "默认项目目录" : "Default project folder"}
@@ -280,6 +311,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
         <div className="settings-actions">
           <button
+            disabled={submitting}
             type="button"
             onClick={() => {
               void (async () => {
@@ -289,7 +321,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     failureMessage: zh
                       ? "无法恢复默认设置，请稍后重试。"
                       : "Could not restore the default settings. Try again.",
-                    onSuccess: props.onClose,
+                    onSuccess: () => {
+                      setApiKeyInput("");
+                      props.onClose();
+                    },
                     operation: props.onSettingsReset,
                     setError: setOperationError,
                   });
@@ -302,7 +337,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             {zh ? "恢复默认" : "Restore defaults"}
           </button>
           <div className="settings-actions-primary">
-            <button type="button" onClick={closeWithoutSaving}>
+            <button disabled={submitting} type="button" onClick={closeWithoutSaving}>
               {zh ? "取消" : "Cancel"}
             </button>
             <button
@@ -317,8 +352,16 @@ export function SettingsPanel(props: SettingsPanelProps) {
                       failureMessage: zh
                         ? "无法保存设置，请检查填写内容后重试。"
                         : "Could not save settings. Check the entered values and try again.",
-                      onSuccess: props.onClose,
-                      operation: () => props.onSettingsChange(toSettingsPatch(draft)),
+                      onSuccess: () => {
+                        setApiKeyInput("");
+                        props.onClose();
+                      },
+                      operation: () =>
+                        saveSettingsWithSessionApiKey({
+                          apiKey: apiKeyInput,
+                          onSaveSettingsWithSessionApiKey: props.onSaveSettingsWithSessionApiKey,
+                          patch: toSettingsPatch(draft),
+                        }),
                       setError: setOperationError,
                     });
                   } finally {
@@ -374,83 +417,52 @@ function Checkbox(props: {
 }
 
 function SessionKeyInput(props: {
+  readonly apiKeyInput: string;
   readonly credentialStatus: CredentialStatus;
   readonly locale: Locale;
-  readonly onSave: (apiKey: string) => Promise<SettingsOperationResult>;
+  readonly onApiKeyInputChange: (apiKey: string) => void;
   readonly onClear: () => Promise<SettingsOperationResult>;
+  readonly onSubmittingChange: (submitting: boolean) => void;
+  readonly submitting: boolean;
 }) {
-  const [apiKeyInput, setApiKeyInput] = useState("");
-  const [savedFeedback, setSavedFeedback] = useState(false);
   const [operationError, setOperationError] = useState<string>();
-  const [submitting, setSubmitting] = useState(false);
   const zh = props.locale === "zh-CN";
   const status = credentialStatusCopy[props.credentialStatus][props.locale];
-  async function handleSave() {
-    const trimmed = apiKeyInput.trim();
-    if (!trimmed) return;
-    setSubmitting(true);
-    try {
-      await performSettingsOperation({
-        failureMessage: zh
-          ? "无法启用访问密钥，请重试。"
-          : "Could not activate the access key. Try again.",
-        onSuccess: () => {
-          setApiKeyInput("");
-          setSavedFeedback(true);
-        },
-        operation: () => props.onSave(trimmed),
-        setError: setOperationError,
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  }
   return (
     <label>
       {zh ? "访问密钥" : "Access key"}
       <div className="session-key-row">
         <input
+          disabled={props.submitting}
+          maxLength={maxSessionApiKeyLength}
           type="password"
           autoComplete="off"
-          placeholder={zh ? "仅用于本次运行" : "Used only for this run"}
-          value={apiKeyInput}
+          placeholder={
+            zh ? "与设置一起保存，仅用于本次运行" : "Save with settings; used only for this run"
+          }
+          value={props.apiKeyInput}
           onChange={(event) => {
-            setApiKeyInput(event.currentTarget.value);
-            setSavedFeedback(false);
+            props.onApiKeyInputChange(event.currentTarget.value);
             setOperationError(undefined);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void handleSave();
-            }
           }}
         />
         <button
-          className="primary"
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={submitting || !apiKeyInput.trim()}
-        >
-          {zh ? "使用" : "Use"}
-        </button>
-        <button
-          disabled={submitting}
+          disabled={props.submitting}
           type="button"
           onClick={() => {
             void (async () => {
-              setSubmitting(true);
+              props.onSubmittingChange(true);
               try {
                 await performSettingsOperation({
                   failureMessage: zh
                     ? "无法清除访问密钥，请重试。"
                     : "Could not clear the access key. Try again.",
-                  onSuccess: () => setSavedFeedback(false),
+                  onSuccess: () => props.onApiKeyInputChange(""),
                   operation: props.onClear,
                   setError: setOperationError,
                 });
               } finally {
-                setSubmitting(false);
+                props.onSubmittingChange(false);
               }
             })();
           }}
@@ -459,13 +471,9 @@ function SessionKeyInput(props: {
         </button>
       </div>
       <span aria-live="polite" className="settings-help">
-        {savedFeedback
-          ? zh
-            ? "本次运行已启用该密钥。"
-            : "The key is active for this run."
-          : zh
-            ? `当前状态：${status}。密钥仅保留在内存中，不会写入磁盘。`
-            : `Current status: ${status}. The key stays in memory and is never written to disk.`}
+        {zh
+          ? `当前状态：${status}。输入密钥后点击“保存设置”即可启用；密钥仅保留在内存中，不会写入磁盘。`
+          : `Current status: ${status}. Enter a key and save settings to activate it; the key stays in memory and is never written to disk.`}
       </span>
       {operationError ? (
         <span aria-live="assertive" className="settings-error" role="alert">

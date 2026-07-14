@@ -58,6 +58,32 @@ describe("desktop IPC boundary", () => {
     ).toThrow(/unsupported/iu);
   });
 
+  it("validates atomic provider settings and session key requests before mutation", () => {
+    const valid = {
+      apiKey: "session-key",
+      patch: { providerBaseUrl: "https://compatible.example/v1" },
+    };
+
+    expect(() =>
+      assertValidIpcArguments("donecheck:settings:set-with-session-api-key", [valid]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:settings:set-with-session-api-key", [
+        { patch: { topK: 8 } },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:settings:set-with-session-api-key", [
+        { ...valid, apiKey: "x".repeat(16_385) },
+      ]),
+    ).toThrow(/length/iu);
+    expect(() =>
+      assertValidIpcArguments("donecheck:settings:set-with-session-api-key", [
+        { ...valid, unexpected: true },
+      ]),
+    ).toThrow(/unsupported/iu);
+  });
+
   it("limits clipboard content and report size", () => {
     expect(() =>
       assertValidIpcArguments("donecheck:clipboard:copy-repair-prompt", [

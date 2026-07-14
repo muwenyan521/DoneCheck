@@ -1,11 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { type DesktopSettings, defaultDesktopSettings } from "../settings-model.js";
+import {
+  type DesktopSettings,
+  type DesktopSettingsPatch,
+  defaultDesktopSettings,
+} from "../settings-model.js";
 import {
   ProviderErrorNotice,
   SettingsPanel,
+  canDismissSettingsPanel,
   createSettingsDraft,
   performSettingsOperation,
+  saveSettingsWithSessionApiKey,
   toSettingsPatch,
 } from "./SettingsPanel.js";
 
@@ -24,8 +30,7 @@ describe("SettingsPanel", () => {
         locale="zh-CN"
         onClearSessionApiKey={async () => ({ ok: true })}
         onClose={() => undefined}
-        onSaveSessionApiKey={async () => ({ ok: true })}
-        onSettingsChange={async () => ({ ok: true })}
+        onSaveSettingsWithSessionApiKey={async () => ({ ok: true })}
         onSettingsReset={async () => ({ ok: true })}
         settings={settings}
       />,
@@ -38,7 +43,7 @@ describe("SettingsPanel", () => {
     expect(html).toContain("离线检查");
     expect(html).toContain("在线分析");
     expect(html).toContain("仅保留在内存中");
-    expect(html).toContain("在线分析下次检查时生效");
+    expect(html).toContain("点击“保存设置”即可启用");
     expect(html).toContain("dist\nnode_modules");
     expect(html).not.toMatch(/Stage|阶段|Deterministic mock|GUI settings center/u);
   });
@@ -51,8 +56,7 @@ describe("SettingsPanel", () => {
         locale="en"
         onClearSessionApiKey={async () => ({ ok: true })}
         onClose={() => undefined}
-        onSaveSessionApiKey={async () => ({ ok: true })}
-        onSettingsChange={async () => ({ ok: true })}
+        onSaveSettingsWithSessionApiKey={async () => ({ ok: true })}
         onSettingsReset={async () => ({ ok: true })}
         settings={{ ...settings, locale: "en" }}
       />,
@@ -73,8 +77,7 @@ describe("SettingsPanel", () => {
         locale="zh-CN"
         onClearSessionApiKey={async () => ({ ok: true })}
         onClose={() => undefined}
-        onSaveSessionApiKey={async () => ({ ok: true })}
-        onSettingsChange={async () => ({ ok: true })}
+        onSaveSettingsWithSessionApiKey={async () => ({ ok: true })}
         onSettingsReset={async () => ({ ok: true })}
         settings={defaultDesktopSettings}
       />,
@@ -123,6 +126,71 @@ describe("SettingsPanel", () => {
 
     expect(setError).toHaveBeenCalledWith(undefined);
     expect(onSuccess).toHaveBeenCalledOnce();
+  });
+
+  it("saves provider settings and a session key through one atomic operation", async () => {
+    const save = vi.fn(async (patch: DesktopSettingsPatch, apiKey?: string) => {
+      expect(patch.providerModel).toBe("compatible-model");
+      expect(apiKey).toBe("session-key");
+      return { ok: true } as const;
+    });
+
+    await expect(
+      saveSettingsWithSessionApiKey({
+        apiKey: "  session-key  ",
+        onSaveSettingsWithSessionApiKey: save,
+        patch: { providerModel: "compatible-model" },
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("returns an atomic save failure without inventing a partial result", async () => {
+    const save = vi.fn(async () => ({ ok: false }) as const);
+
+    await expect(
+      saveSettingsWithSessionApiKey({
+        apiKey: "session-key",
+        onSaveSettingsWithSessionApiKey: save,
+        patch: { providerMode: "openai-compatible" },
+      }),
+    ).resolves.toEqual({ ok: false });
+
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the current credential when no replacement key is entered", async () => {
+    const save = vi.fn(async () => ({ ok: true }) as const);
+
+    await expect(
+      saveSettingsWithSessionApiKey({
+        apiKey: "   ",
+        onSaveSettingsWithSessionApiKey: save,
+        patch: { topK: 8 },
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(save).toHaveBeenCalledWith({ topK: 8 }, undefined);
+  });
+
+  it("rejects an oversized session key before changing provider settings", async () => {
+    const save = vi.fn(async () => ({ ok: true }) as const);
+
+    await expect(
+      saveSettingsWithSessionApiKey({
+        apiKey: "x".repeat(16_385),
+        onSaveSettingsWithSessionApiKey: save,
+        patch: { providerBaseUrl: "https://new-provider.example/v1" },
+      }),
+    ).resolves.toEqual({ ok: false });
+
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("does not allow the settings dialog to close while a save is in progress", () => {
+    expect(canDismissSettingsPanel(false)).toBe(true);
+    expect(canDismissSettingsPanel(true)).toBe(false);
   });
 });
 

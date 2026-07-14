@@ -50,6 +50,7 @@ export function isRetryableProviderError(error: unknown): boolean {
     /\b(?:400|401|403|404|422)\b/u.test(normalized) ||
     normalized.includes("invalid api key") ||
     normalized.includes("response_format") ||
+    normalized.includes("no json content") ||
     normalized.includes("not valid json") ||
     normalized.includes("unexpected token")
   ) {

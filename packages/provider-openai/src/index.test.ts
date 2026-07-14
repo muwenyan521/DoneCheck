@@ -454,6 +454,86 @@ describe("OpenAIProvider", () => {
     expect(createCalls).toBe(1);
   });
 
+  it("falls back when strict structured output returns no parsed object", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let createCalls = 0;
+    const provider = new OpenAIProvider({
+      client: {
+        beta: {
+          chat: {
+            completions: {
+              parse: async () => ({
+                choices: [{ message: { content: null, parsed: null } }],
+                model: "compatible-model",
+              }),
+            },
+          },
+        },
+        chat: {
+          completions: {
+            create: async () => {
+              createCalls += 1;
+              return {
+                choices: [{ message: { content: '{"ok":true}' } }],
+                model: "compatible-model",
+              };
+            },
+          },
+        },
+      } as never,
+    });
+    const z = await import("zod");
+
+    await expect(
+      provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      }),
+    ).resolves.toMatchObject({ object: { ok: true } });
+    expect(createCalls).toBe(1);
+  });
+
+  it("does not issue a repair request when compatibility output is empty", async () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    let createCalls = 0;
+    const provider = new OpenAIProvider({
+      client: {
+        beta: {
+          chat: {
+            completions: {
+              parse: async () => ({
+                choices: [{ message: { content: null, parsed: null } }],
+                model: "compatible-model",
+              }),
+            },
+          },
+        },
+        chat: {
+          completions: {
+            create: async () => {
+              createCalls += 1;
+              return {
+                choices: [{ message: { content: "" } }],
+                model: "compatible-model",
+              };
+            },
+          },
+        },
+      } as never,
+    });
+    const z = await import("zod");
+
+    await expect(
+      provider.generateObject({
+        prompt: { system: "s", user: "u", version: "v1" },
+        schema: z.object({ ok: z.boolean() }),
+        schemaName: "Ok",
+      }),
+    ).rejects.toThrow("OpenAI returned no JSON content for schema Ok");
+    expect(createCalls).toBe(1);
+  });
+
   it("remembers compatibility mode for a schema after structured output fails", async () => {
     process.env.OPENAI_API_KEY = "sk-test";
     let parseCalls = 0;

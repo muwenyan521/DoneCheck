@@ -9,6 +9,7 @@ describe("provider retry policy", () => {
     "Analysis canceled",
     "401 invalid API key",
     "response_format is unsupported",
+    "OpenAI returned no JSON content for schema RequirementDecompositionOutput",
     "Unexpected token < in JSON at position 0",
   ])("does not retry %s", async (message) => {
     const operation = vi.fn(async () => {

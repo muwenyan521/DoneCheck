@@ -27,6 +27,20 @@ class StructuredOutputCompatibilityError extends Error {
   }
 }
 
+class MissingStructuredOutputError extends Error {
+  constructor(schemaName: string) {
+    super(`OpenAI returned no parsed object for schema ${schemaName}`);
+    this.name = "MissingStructuredOutputError";
+  }
+}
+
+class EmptyCompatibilityResponseError extends Error {
+  constructor(schemaName: string) {
+    super(`OpenAI returned no JSON content for schema ${schemaName}`);
+    this.name = "EmptyCompatibilityResponseError";
+  }
+}
+
 export interface OpenAIProviderOptions {
   readonly apiKey?: string;
   readonly model?: string;
@@ -141,7 +155,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
     );
     const parsed = completion.choices[0]?.message?.parsed;
     if (parsed === undefined || parsed === null) {
-      throw new Error(`OpenAI returned no parsed object for schema ${input.schemaName}`);
+      throw new MissingStructuredOutputError(input.schemaName);
     }
     return {
       metadata: {
@@ -226,6 +240,7 @@ export class OpenAIProvider implements ProviderWithMetadata {
   ): Promise<{ parsed: T }> {
     const first = parseAndValidateFallbackContent(input, content, guide);
     if (first.ok) return { parsed: first.value };
+    if (first.error instanceof EmptyCompatibilityResponseError) throw first.error;
     const repair = await this.client.chat.completions.create(
       this.buildFallbackRequest(
         input,
@@ -258,6 +273,7 @@ function isUnsupportedResponseFormatError(error: unknown): boolean {
 
 function shouldTryCompatibilityMode(error: unknown): boolean {
   return (
+    error instanceof MissingStructuredOutputError ||
     isUnsupportedResponseFormatError(error) ||
     isJsonParseError(error) ||
     isUpstreamGatewayError(error)
@@ -326,7 +342,7 @@ function parseAndValidateFallbackContent<T>(
   if (typeof content !== "string" || content.length === 0) {
     return {
       ok: false,
-      error: new Error(`OpenAI returned no JSON content for schema ${input.schemaName}`),
+      error: new EmptyCompatibilityResponseError(input.schemaName),
     };
   }
   try {

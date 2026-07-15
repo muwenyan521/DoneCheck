@@ -1,4 +1,5 @@
 import { extractEvidenceSnippets } from "../evidence/snippet.js";
+import type { ModelOutputLanguage } from "../prompts/output-language.js";
 import { buildJudgementReport } from "../rules/index.js";
 import type {
   FakeImplementationSignal,
@@ -26,6 +27,7 @@ export interface PipelineFile {
 export interface OrchestrateAnalysisInput {
   readonly requirement: string;
   readonly claim?: string;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly files: readonly PipelineFile[];
   readonly provider: LLMProvider;
   readonly generatedAt: string;
@@ -76,6 +78,7 @@ export async function orchestrateAnalysis(
   const selectionClaim = claims.map((item) => `${item.id}: ${item.text}`).join("\n");
 
   const selection = await selectCandidateFiles({
+    ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
     requirement: selectionRequirement,
     ...(selectionClaim.length === 0 ? {} : { claim: selectionClaim }),
     projectFiles,
@@ -129,6 +132,7 @@ export async function orchestrateAnalysis(
     async (requirement) => {
       const match = matches.find((item) => item.requirement.id === requirement.id);
       return draftSemanticJudgements({
+        ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
         requirements: [requirement],
         ...(match === undefined ? {} : { claim: match.claim }),
         candidateFiles: selection.candidateFiles.map((p) => ({

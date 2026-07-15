@@ -11,7 +11,7 @@ describe("decomposeRequirements", () => {
     const provider: LLMProvider = {
       async generateObject({ prompt, schema, schemaName }) {
         schemaNames.push(schemaName);
-        expect(prompt.version).toBe("requirement-decomposition-v5");
+        expect(prompt.version).toBe("requirement-decomposition-v6");
         const payload = JSON.parse(prompt.user) as Record<string, unknown>;
         expect(payload.requirement).toContain("REQ-1");
         return {

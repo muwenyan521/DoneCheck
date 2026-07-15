@@ -90,6 +90,7 @@ describe("analysis request snapshots", () => {
     const result = await startAnalyzeFlow({ api, snapshot: value });
     expect(result).toEqual({ kind: "review", decomposition, snapshot: value });
     expect(api.decomposeCalls[0]?.requestId).toBe(value.requestId);
+    expect(api.decomposeCalls[0]?.locale).toBe("zh-CN");
     expect(api.analyzeCalls).toHaveLength(0);
   });
 
@@ -105,6 +106,7 @@ describe("analysis request snapshots", () => {
     expect(api.analyzeCalls[0]).toEqual(
       expect.objectContaining({
         requestId: value.requestId,
+        locale: "zh-CN",
         workspaceDir: "/workspace/demo",
         requirement: "Users can log in.",
         requirements: edited.requirements,

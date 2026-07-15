@@ -1,4 +1,5 @@
 import { buildFileSelectionPrompt } from "../prompts/index.js";
+import type { ModelOutputLanguage } from "../prompts/output-language.js";
 import type { LLMProvider } from "./provider.js";
 import type { RetryOptions } from "./retry.js";
 import { withRetry } from "./retry.js";
@@ -11,6 +12,7 @@ import {
 
 export interface SelectCandidateFilesInput {
   readonly claim?: string;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly projectFiles: readonly string[];
   readonly provider: LLMProvider;
   readonly requirement: string;
@@ -27,6 +29,7 @@ export async function selectCandidateFiles(
   const topK = input.topK ?? 20;
   const projectFileSet = new Set(input.projectFiles.map(normalizePath));
   const prompt = buildFileSelectionPrompt({
+    ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
     requirement: input.requirement,
     structureSummary: input.structureSummary,
     topK,

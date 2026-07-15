@@ -68,6 +68,7 @@ export async function runCli(runtime: CliRuntime): Promise<number> {
     runtime.stderr("Analyzing requirements...\n");
     const decomposition = await decomposeRequirements({
       claim: input.value.evidence,
+      outputLanguage: "en",
       provider,
       requirement: input.value.requirement,
     });
@@ -79,6 +80,7 @@ export async function runCli(runtime: CliRuntime): Promise<number> {
     const result = await runDoneCheckPipelineNode({
       claim: input.value.evidence,
       claims: decomposition.claims,
+      outputLanguage: "en",
       provider,
       requirement: input.value.requirement,
       requirements: decomposition.requirements,

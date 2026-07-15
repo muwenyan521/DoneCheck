@@ -1,4 +1,6 @@
-export const REQUIREMENT_DECOMPOSITION_PROMPT_VERSION = "requirement-decomposition-v5";
+import { type ModelOutputLanguage, resolveModelOutputLanguage } from "./output-language.js";
+
+export const REQUIREMENT_DECOMPOSITION_PROMPT_VERSION = "requirement-decomposition-v6";
 
 export const requirementDecompositionSystemPromptTemplate = [
   `DoneCheck requirement decomposition prompt ${REQUIREMENT_DECOMPOSITION_PROMPT_VERSION}.`,
@@ -29,6 +31,11 @@ export const requirementDecompositionSystemPromptTemplate = [
   "",
   "## Role",
   "You are a requirements analyst. Your only task is to split raw user requirements and AI completion claims into atomic, independently verifiable items for downstream analysis.",
+  "",
+  "## Output language",
+  "- `outputLanguage` is the report page's display language: `zh-CN` means Simplified Chinese and `en` means English.",
+  "- The product displays your text without translation. All user-facing natural-language values in `requirements[].text`, `claims[].text`, `assumptions`, `clarifyingQuestions`, and `warnings` MUST use `outputLanguage`; never mix languages.",
+  "- Preserve stable IDs, code identifiers, file paths, command names, literal values, and quoted source text verbatim when translating surrounding prose.",
   "",
   "## Atomicity rules",
   "- Each item must express exactly one verifiable behavior, constraint, or outcome.",
@@ -112,6 +119,7 @@ export const requirementDecompositionPromptContract = {
 
 export interface BuildRequirementDecompositionPromptInput {
   readonly claim?: string;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly requirement: string;
 }
 
@@ -124,6 +132,7 @@ export function buildRequirementDecompositionPrompt(
       {
         claim: input.claim,
         outputContract: requirementDecompositionPromptContract,
+        outputLanguage: resolveModelOutputLanguage(input.outputLanguage),
         requirement: input.requirement,
       },
       null,

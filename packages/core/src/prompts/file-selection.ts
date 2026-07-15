@@ -1,12 +1,18 @@
 import type { StaticSignal } from "../semantic/schema.js";
+import { type ModelOutputLanguage, resolveModelOutputLanguage } from "./output-language.js";
 
-export const FILE_SELECTION_PROMPT_VERSION = "file-selection-v2";
+export const FILE_SELECTION_PROMPT_VERSION = "file-selection-v3";
 
 export const fileSelectionSystemPromptTemplate = [
   `DoneCheck file selection prompt ${FILE_SELECTION_PROMPT_VERSION}.`,
   "",
   "## Role",
   "You are a code-navigation assistant. Select candidate files that most likely contain the implementation (or absence of implementation) relevant to the given requirement, for later semantic analysis.",
+  "",
+  "## Output language",
+  "- `outputLanguage` is the report page's display language: `zh-CN` means Simplified Chinese and `en` means English.",
+  "- The product displays your text without translation. All user-facing natural-language values in `reasoningSummary` and `warnings` MUST use `outputLanguage`; never mix languages.",
+  "- Preserve candidate file paths, code identifiers, command names, literal values, and quoted source text verbatim.",
   "",
   "## Selection principles",
   "- Recall is more important than precision: when in doubt, include the file.",
@@ -50,6 +56,7 @@ export const fileSelectionModelOutputPromptContract = {
 
 export interface BuildFileSelectionPromptInput {
   readonly claim?: string;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly requirement: string;
   readonly staticSignals?: readonly StaticSignal[];
   readonly structureSummary: string;
@@ -63,6 +70,7 @@ export function buildFileSelectionPrompt(input: BuildFileSelectionPromptInput) {
       {
         claim: input.claim,
         outputContract: fileSelectionModelOutputPromptContract,
+        outputLanguage: resolveModelOutputLanguage(input.outputLanguage),
         requirement: input.requirement,
         staticSignals: input.staticSignals ?? [],
         structureSummary: input.structureSummary,

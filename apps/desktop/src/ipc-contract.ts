@@ -66,6 +66,7 @@ export interface DecomposeRequest {
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
+  readonly locale?: Locale;
   readonly options?: { readonly ignore?: readonly string[] };
   readonly workflowToken?: string;
 }
@@ -84,6 +85,7 @@ export interface AnalyzeRequest {
   readonly workspaceDir: string;
   readonly requirement: string;
   readonly claim?: string;
+  readonly locale?: Locale;
   readonly workflowToken?: string;
   readonly requirements?: readonly DecomposeItem[];
   readonly claims?: readonly DecomposeItem[];

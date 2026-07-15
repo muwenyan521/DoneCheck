@@ -116,6 +116,7 @@ export async function startAnalyzeFlow(params: {
   if (!started.ok) return { kind: "error", error: analyzeFlowError(started.error) };
   const activeSnapshot = started.data;
   const decomposeResult = await api.decompose({
+    locale: activeSnapshot.locale,
     requestId: activeSnapshot.requestId,
     workspaceDir: activeSnapshot.workspaceDir,
     requirement: activeSnapshot.requirement,
@@ -151,6 +152,7 @@ export async function proceedAnalyze(params: {
     return { kind: "error", error: localError(snapshot.locale, "remaining-requirement") };
   }
   const analyzeResult = await api.analyze({
+    locale: snapshot.locale,
     requestId: snapshot.requestId,
     workspaceDir: snapshot.workspaceDir,
     requirement: snapshot.requirement,

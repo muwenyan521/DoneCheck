@@ -1,4 +1,5 @@
 import { buildSemanticJudgementPrompt } from "../prompts/index.js";
+import type { ModelOutputLanguage } from "../prompts/output-language.js";
 import { normalizeEvidenceRefs } from "./evidence-ref-normalization.js";
 import { mapWithConcurrency } from "./limit.js";
 import type { LLMProvider } from "./provider.js";
@@ -19,6 +20,7 @@ export interface DraftSemanticJudgementInput {
   readonly claim?: SemanticClaim;
   readonly evidenceSnippets: readonly EvidenceSnippet[];
   readonly onNormalizationWarnings?: (warnings: readonly string[]) => void;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly provider: LLMProvider;
   readonly requirement: SemanticRequirement;
   readonly retry?: RetryOptions;
@@ -31,6 +33,7 @@ export interface DraftSemanticJudgementsInput {
   readonly concurrency?: number;
   readonly evidenceSnippets: readonly EvidenceSnippet[];
   readonly onNormalizationWarnings?: (warnings: readonly string[]) => void;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly provider: LLMProvider;
   readonly requirements: readonly SemanticRequirement[];
   readonly retry?: RetryOptions;
@@ -42,6 +45,7 @@ export async function draftSemanticJudgement(
 ): Promise<SemanticJudgementDraft> {
   const prompt = buildSemanticJudgementPrompt({
     evidenceSnippets: input.evidenceSnippets,
+    ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
     requirement: input.requirement,
     ...(input.candidateFiles === undefined ? {} : { candidateFiles: input.candidateFiles }),
     ...(input.claim === undefined ? {} : { claim: input.claim }),
@@ -84,6 +88,7 @@ export async function draftSemanticJudgements(
       ...(input.onNormalizationWarnings === undefined
         ? {}
         : { onNormalizationWarnings: input.onNormalizationWarnings }),
+      ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
     }),
   );
 }

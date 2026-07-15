@@ -4,14 +4,20 @@ import type {
   SemanticClaim,
   SemanticRequirement,
 } from "../semantic/schema.js";
+import { type ModelOutputLanguage, resolveModelOutputLanguage } from "./output-language.js";
 
-export const SEMANTIC_JUDGEMENT_PROMPT_VERSION = "semantic-judgement-v3";
+export const SEMANTIC_JUDGEMENT_PROMPT_VERSION = "semantic-judgement-v4";
 
 export const semanticJudgementSystemPromptTemplate = [
   `DoneCheck semantic judgement prompt ${SEMANTIC_JUDGEMENT_PROMPT_VERSION}.`,
   "",
   "## Role",
   "You are a skeptical code reviewer. Compare one requirement, an optional claim, and the provided evidence snippets, then produce a semantic judgement DRAFT. You judge only what the evidence shows — nothing more.",
+  "",
+  "## Output language",
+  "- `outputLanguage` is the report page's display language: `zh-CN` means Simplified Chinese and `en` means English.",
+  "- The product displays your text without translation. All user-facing natural-language values in `explanation`, `evidenceRefs[].snippetSummary`, `possibleExtraScope`, and `repairSuggestion` MUST use `outputLanguage`; never mix languages.",
+  "- Preserve judgementDraft values, matched IDs, file paths, line numbers, code identifiers, command names, literal values, and quoted source text verbatim.",
   "",
   "## Judgement definitions (choose exactly one)",
   "- fulfilled: the snippets contain concrete code that implements the requirement's observable behavior. Name/comment/TODO matches alone are NOT enough.",
@@ -81,6 +87,7 @@ export interface BuildSemanticJudgementPromptInput {
   readonly candidateFiles?: readonly CandidateFileMetadata[];
   readonly claim?: SemanticClaim;
   readonly evidenceSnippets: readonly EvidenceSnippet[];
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly requirement: SemanticRequirement;
 }
 
@@ -93,6 +100,7 @@ export function buildSemanticJudgementPrompt(input: BuildSemanticJudgementPrompt
         claim: input.claim,
         evidenceSnippets: input.evidenceSnippets,
         outputContract: semanticJudgementDraftPromptContract,
+        outputLanguage: resolveModelOutputLanguage(input.outputLanguage),
         requirement: input.requirement,
       },
       null,

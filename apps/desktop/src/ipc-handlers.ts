@@ -255,6 +255,7 @@ async function analyze(
   const result = await runDoneCheckPipelineNode({
     workspacePath: request.workspaceDir,
     requirement: request.requirement,
+    outputLanguage: request.locale ?? "zh-CN",
     ...(request.claim === undefined ? {} : { claim: request.claim }),
     ...(request.requirements === undefined ? {} : { requirements: request.requirements }),
     ...(request.claims === undefined ? {} : { claims: request.claims }),
@@ -289,6 +290,7 @@ async function decompose(
   if (provider === undefined) throw invalidInput("provider dependency was not provided");
   const decomposition = await decomposeRequirements({
     requirement: request.requirement,
+    outputLanguage: request.locale ?? "zh-CN",
     provider,
     ...(request.claim === undefined ? {} : { claim: request.claim }),
     signal,
@@ -466,6 +468,7 @@ function validateAnalyzeRequest(request: AnalyzeRequest): void {
   if (typeof request.requirement !== "string" || request.requirement.trim().length === 0) {
     throw invalidInput("requirement is required");
   }
+  validateRequestLocale(request.locale);
 }
 
 function validateDecomposeRequest(request: DecomposeRequest): void {
@@ -475,6 +478,15 @@ function validateDecomposeRequest(request: DecomposeRequest): void {
   }
   if (typeof request.requirement !== "string" || request.requirement.trim().length === 0) {
     throw invalidInput("requirement is required");
+  }
+  validateRequestLocale(request.locale);
+}
+
+function validateRequestLocale(
+  locale: AnalyzeRequest["locale"] | DecomposeRequest["locale"],
+): void {
+  if (locale !== undefined && locale !== "en" && locale !== "zh-CN") {
+    throw invalidInput("locale is not supported");
   }
 }
 

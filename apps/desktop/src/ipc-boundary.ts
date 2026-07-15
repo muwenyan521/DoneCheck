@@ -47,9 +47,11 @@ export function assertValidIpcArguments(
         "workspaceDir",
         "requirement",
         "claim",
+        "locale",
         "options",
         "workflowToken",
       ]);
+      if (isRecord(request)) validateAnalysisLocale(request);
       validateWorkflowFields(request);
       return;
     case "donecheck:analyze":
@@ -115,6 +117,7 @@ function validateAnalyze(value: unknown): void {
     "workspaceDir",
     "requirement",
     "claim",
+    "locale",
     "requirements",
     "claims",
     "options",
@@ -123,6 +126,7 @@ function validateAnalyze(value: unknown): void {
   if (!isRecord(value)) return;
   if (value.requirements !== undefined) validateItems(value.requirements, "requirements");
   if (value.claims !== undefined) validateItems(value.claims, "claims");
+  validateAnalysisLocale(value);
   if (value.options !== undefined) {
     assertRecordWithKeys(value.options, ["generatedAt", "topK", "ignore"]);
     if (value.options.generatedAt !== undefined)
@@ -151,6 +155,12 @@ function validateWorkflowFields(value: unknown): void {
     value.options.ignore !== undefined
   ) {
     validateStringArray(value.options.ignore, "ignore", 500, 4_096);
+  }
+}
+
+function validateAnalysisLocale(value: Record<string, unknown>): void {
+  if (value.locale !== undefined && value.locale !== "en" && value.locale !== "zh-CN") {
+    throw new Error("The analysis language is not supported.");
   }
 }
 

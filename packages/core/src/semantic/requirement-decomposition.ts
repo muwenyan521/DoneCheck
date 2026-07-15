@@ -1,4 +1,5 @@
 import { buildRequirementDecompositionPrompt } from "../prompts/index.js";
+import type { ModelOutputLanguage } from "../prompts/output-language.js";
 import type { LLMProvider } from "./provider.js";
 import {
   type RequirementDecompositionOutput,
@@ -10,6 +11,7 @@ import type { SemanticClaim, SemanticRequirement } from "./schema.js";
 
 export interface DecomposeRequirementsInput {
   readonly claim?: string;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly provider: LLMProvider;
   readonly requirement: string;
   readonly retry?: RetryOptions;
@@ -20,6 +22,7 @@ export async function decomposeRequirements(
   input: DecomposeRequirementsInput,
 ): Promise<RequirementDecompositionOutput> {
   const prompt = buildRequirementDecompositionPrompt({
+    ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
     requirement: input.requirement,
     ...(input.claim === undefined ? {} : { claim: input.claim }),
   });

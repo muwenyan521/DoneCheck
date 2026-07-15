@@ -21,6 +21,15 @@ describe("desktop IPC boundary", () => {
     const valid = { requestId: "request-1", workspaceDir: "/tmp/project", requirement: "works" };
     expect(() => assertValidIpcArguments("donecheck:decompose", [valid])).not.toThrow();
     expect(() =>
+      assertValidIpcArguments("donecheck:decompose", [{ ...valid, locale: "zh-CN" }]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:analyze", [{ ...valid, locale: "en" }]),
+    ).not.toThrow();
+    expect(() =>
+      assertValidIpcArguments("donecheck:analyze", [{ ...valid, locale: "fr" }]),
+    ).toThrow(/language/iu);
+    expect(() =>
       assertValidIpcArguments("donecheck:decompose", [{ ...valid, unexpected: true }]),
     ).toThrow(/unsupported/iu);
     expect(() =>

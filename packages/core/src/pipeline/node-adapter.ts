@@ -2,6 +2,7 @@ import { constants, type Stats } from "node:fs";
 import { access, lstat, open, readdir } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { relative } from "node:path";
+import type { ModelOutputLanguage } from "../prompts/output-language.js";
 import type { LLMProvider } from "../semantic/provider.js";
 import type { SemanticClaim, SemanticRequirement } from "../semantic/schema.js";
 import { orchestrateAnalysis } from "./orchestrator.js";
@@ -139,6 +140,7 @@ export interface RunDoneCheckPipelineNodeInput {
   readonly workspacePath: string;
   readonly requirement: string;
   readonly claim?: string;
+  readonly outputLanguage?: ModelOutputLanguage;
   readonly provider: LLMProvider;
   readonly generatedAt?: string;
   readonly claims?: readonly SemanticClaim[];
@@ -167,6 +169,7 @@ export async function runDoneCheckPipelineNode(input: RunDoneCheckPipelineNodeIn
   return orchestrateAnalysis({
     requirement: input.requirement,
     ...(input.claim === undefined ? {} : { claim: input.claim }),
+    ...(input.outputLanguage === undefined ? {} : { outputLanguage: input.outputLanguage }),
     ...(input.claims === undefined ? {} : { claims: input.claims }),
     ...(input.requirements === undefined ? {} : { requirements: input.requirements }),
     files,
